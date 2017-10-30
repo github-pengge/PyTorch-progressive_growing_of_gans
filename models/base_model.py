@@ -39,8 +39,7 @@ class WScaleLayer(nn.Module):
 
 class MinibatchStatConcatLayer(nn.Module):
 	'''Minibatch stat concatenation layer. 
-	-func is the function to use for the activations across minibatch
-	-averaging tells how much averaging to use ('all', 'spatial', 'none')
+	-averaging: tells how much averaging to use ('all', 'spatial', 'none')
 	Currently only support averaging='all'
 	'''
 	def __init__(self, avergaing='all'):
@@ -55,9 +54,9 @@ class MinibatchStatConcatLayer(nn.Module):
 		return torch.cat([x, res], 1)
 
 
-class ConvBlock(nn.Module):
+class GConvBlock(nn.Module):
 	def __init__(self, in_channel, out_channel, kernel_size, padding, to_rgb=False):
-		super(ConvBlock, self).__init__()
+		super(GConvBlock, self).__init__()
 		self.in_channel = in_channel
 		self.out_channel = out_channel
 		self.kernel_size = kernel_size
@@ -82,9 +81,9 @@ class ConvBlock(nn.Module):
 		return self.feature(x)
 
 
-class SameResolution3LayerBlock(nn.Module):
+class GSameResolution3LayerBlock(nn.Module): # 3 layers, not counting to_rgb layer
 	def __init__(self, in_channel, out_channel, channel=3, first_block=False, nks1=3, nks2=3):
-		super(SameResolution3LayerBlock, self).__init__()
+		super(GSameResolution3LayerBlock, self).__init__()
 		self.in_channel = in_channel
 		self.out_channel = out_channel
 		self.channel = channel
@@ -94,15 +93,15 @@ class SameResolution3LayerBlock(nn.Module):
 
 		self.block = []
 		if self.first_block:
-			b = [ConvBlock(self.in_channel, self.out_channel, self.nks1, self.nks1-1)]
+			b = [GConvBlock(self.in_channel, self.out_channel, self.nks1, self.nks1-1)]
 		else:
 			b = [nn.Upsample(scale_factor=2, mode='nearest')]
-			b += [ConvBlock(self.in_channel, self.out_channel, self.nks1, 1)]
+			b += [GConvBlock(self.in_channel, self.out_channel, self.nks1, 1)]
 		self.block += b
-		self.block += [ConvBlock(self.out_channel, self.out_channel, self.nks2, 1)]
+		self.block += [GConvBlock(self.out_channel, self.out_channel, self.nks2, 1)]
 		self.feature = nn.Sequential(self.block)
 
-		self.to_rgb = ConvBlock(self.out_channel, self.channel, 1, 1, True)
+		self.to_rgb = GConvBlock(self.out_channel, self.channel, 1, 1, True)
 	
 	def forward(self, x, to_rgb=False):
 		x = self.feature(x)
@@ -112,7 +111,26 @@ class SameResolution3LayerBlock(nn.Module):
 			return x
 
 
+class GDropLayer(nn.Module):
+	def __init__(self):
+		super(GDropLayer, self).__init__()
+		pass
+
+	def forward(self, x):
+		pass
 
 
+class DConvblock(nn.Module):
+	def __init__(self, in_channel, out_channel, kernel_size, padding, from_rgb=False):
+		super(DConvblock, self).__init__()
+		pass
+
+	def forward(self, x):
+		pass
+
+class DDownsmple3LayerBlock(nn.Module): # 3 layers, not counting from_rgb layer
+	def __init__(self, in_channel, out_channel, channel=3, last_block=False, nks1=3, nks2=3):
+		super(DDownsmple3LayerBlock, self).__init__()
+		self.in_channel = in_channel
 
 
