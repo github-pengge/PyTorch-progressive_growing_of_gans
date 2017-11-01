@@ -4,7 +4,7 @@ from glob import glob
 import numpy as np 
 
 
-prefix = '/data/rui.wu/gapeng/fader_nets/datasets/'
+prefix = '../datasets/'
 
 def get_img(img_path, is_crop=True, crop_h=256, resize_h=64, normalize=False):
 	img = scipy.misc.imread(img_path, mode='RGB').astype(np.float)
@@ -24,7 +24,7 @@ def get_img(img_path, is_crop=True, crop_h=256, resize_h=64, normalize=False):
 
 class CelebA():
 	def __init__(self, shuffle=False):
-		datapath = os.path.join(prefix, 'celeba/img_align_celeba')
+		datapath = os.path.join(prefix, 'celebA/align_5p')
 		self.z_dim = 100
 		self.channel = 3
 		self.shuffle = shuffle
@@ -41,10 +41,11 @@ class CelebA():
 	def save_imgs(self, samples, file_name):
 		N_samples, channel, height, width = samples.shape
 		N_row = N_col = int(np.ceil(N_samples**0.5))
-		combined_imgs = np.ones(channel, N_row*height, N_col*width) * 255
+		combined_imgs = np.ones((channel, N_row*height, N_col*width)) * 255
 		for i in range(N_row):
 			for j in range(N_col):
-				combined_imgs[:,i*height:(i+1)*height, j*width:(j+1)*width] = samples[i*N_col+j]
+				if i*N_col+j < samples.shape[0]:
+					combined_imgs[:,i*height:(i+1)*height, j*width:(j+1)*width] = samples[i*N_col+j]
 		combined_imgs = np.transpose(combined_imgs, [1, 2, 0]).astype(np.uint8)
 		scipy.misc.imsave(file_name+'.png', combined_imgs)
 
