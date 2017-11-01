@@ -4,7 +4,7 @@ from glob import glob
 import numpy as np 
 
 
-prefix = '../datasets/'
+prefix = '~/datasets/'
 
 def get_img(img_path, is_crop=True, crop_h=256, resize_h=64, normalize=False):
 	img = scipy.misc.imread(img_path, mode='RGB').astype(np.float)
