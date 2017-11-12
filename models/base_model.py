@@ -1,155 +1,256 @@
 # -*- coding: utf-8 -*-
 import torch
-from torch.autograd import Variable
-import torch.nn as nn 
-from torch.nn.init import kaiming_normal
-import math
+import torch.nn as nn
+from torch.autograd import Variable, Parameter
+from torch.nn import functional as F
+from torch.nn.init import kaiming_normal, calculate_gain
+import numpy as np
+import sys
+if sys.version.info.major == 3:
+	from functools import reduce
 
 
 class PixelNormLayer(nn.Module):
-    def __init__(self, eps=1e-8):
-        super(PixelNormLayer, self).__init__()
-        self.eps = 1e-8
-        self.norm = lambda x: x / (torch.mean(x**2, dim=1, keepdim=True) + self.eps) ** 0.5
-    
-    def forward(self, x):
-        return self.norm(x)
+	def __init__(self, eps=1e-8):
+		super(PixelNormLayer, self).__init__()
+	
+	def forward(self, x):
+		return x / (torch.mean(x**2, dim=1, keepdim=True) + 1e-8) ** 0.5
+
+	def __repr__(self):
+		return self.__class__.__name__ + '(eps = %s)' % (self.eps)
 
 
 class WScaleLayer(nn.Module):
-    def __init__(self, layer):
-        super(WScaleLayer, self).__init__()
-        weight = layer.weight
-        scale = None
-        if weight is not None:
-            scale = (torch.mean(weight.data ** 2) + 1e-8) ** 0.5
-        b = layer.bias
-        weight /= scale
-        layer.bias = None
-        self.scale = scale
-        self.b = b
+	def __init__(self, incoming):
+		super(WScaleLayer, self).__init__()
+		self.incoming = incoming
+		self.scale = torch.sqrt(torch.mean(self.incoming.weight.data ** 2))
+		self.incoming.weight = self.incoming.weight / self.scale
+		self.bias = None
+		if self.incoming.bias is not None:
+			self.bias = self.incoming.bias
+			self.incoming.bias = None
 
-    def forward(self, x):
-        size = x.size()
-        if self.scale:
-            x *= self.scale
-        if self.b is not None:
-            x += b.view(1, -1, 1, 1)
-        return x
+	def forward(self, x):
+		x = self.scale * x
+		if self.bias:
+			x += self.bias
+		return x
+
+	def __repr__(self):
+		param_str = '(incoming = %s)' % (self.incoming.__class__.__name__)
+		return self.__class__.__name__ + param_str
+
+
+def mean(tensor, axis, **kwargs):
+	if isinstance(axis, int):
+		axis = [axis]
+	for ax in axis:
+		tensor = torch.mean(tensor, axis=ax, **kwargs)
+	return tensor
 
 
 class MinibatchStatConcatLayer(nn.Module):
-    '''Minibatch stat concatenation layer. 
-    -averaging: tells how much averaging to use ('all', 'spatial', 'none')
-    Currently only support averaging='all'
-    '''
-    def __init__(self, avergaing='all'):
-        super(MinibatchStatConcatLayer, self).__init__()
-        self.avergaing = avergaing.lower()
-        if self.avergaing != 'all':
-            raise NotImplementedError("Currently only support averaging='all'.")
+	def __init__(self, averaging='all'):
+		super(MinibatchStatConcatLayer, self).__init__()
+		self.averaging = averaging.lower()
+		if 'group' in self.averaging:
+			self.n = int(self.averaging[5:])
+		else:
+			assert self.averaging in ['all', 'flat', 'spatial', 'none', 'gpool'], 'Invalid averaging mode'%self.averaging
+		self.adjusted_std = lambda x, **kwargs: torch.sqrt(torch.mean((x - torch.mean(x, **kwargs)) ** 2, **kwargs) + 1e-8)
 
-    def forward(self, x):
-        std = torch.std(x, 0, keepdim=True, unbiased=False)
-        res = torch.mean(std, keepdim=True).expand(x.size(0), 1, x.size(2), x.size(3))
-        return torch.cat([x, res], 1)
+	def forward(self, x):
+		shape = x.size()
+		target_shape = shape.copy()
+		vals = self.adjusted_std(x, dim=0, keepdim=True)
+		if self.averaging == 'all':
+			target_shape[1] = 1
+			vals = torch.mean(vals, keepdim=True)
+		elif self.averaging == 'spatial':
+			if len(shape) == 4:
+				vals = mean(vals, axis=[2,3], keepdim=True)  # torch.mean(torch.mean(vals, 2, keepdim=True), 3, keepdim=True)
+		elif self.averaging == 'none':
+			target_shape = [target_shape[0]] + [s for s in target_shape[1:]]
+		elif self.averaging == 'gpool':
+			if len(shape) == 4:
+				vals = mean(x, [0,2,3], keepdim=True)  # torch.mean(torch.mean(torch.mean(x, 2, keepdim=True), 3, keepdim=True), 0, keepdim=True)
+		elif self.averaging == 'flat':
+			target_shape[1] = 1
+			vals = torch.FloatTensor([self.adjusted_std(x)])
+		else:  # self.averaging == 'group'
+			target_shape[1] = self.n
+			vals = vals.view(self.n, self.shape[1]/self.n, self.shape[2], self.shape[3])
+			vals = mean(vals, axis=0, keepdim=True).view(1, self.n, 1, 1)
+		vals = vals.expand(*target_shape)
+		return torch.cat([x, vals], 1)
 
-
-class ConvBlock(nn.Module):
-    def __init__(self, in_channel, out_channel, kernel_size, padding, to_rgb=False):
-        super(ConvBlock, self).__init__()
-        self.in_channel = in_channel
-        self.out_channel = out_channel
-        self.kernel_size = kernel_size
-        self.padding = padding
-        self.to_rgb = to_rgb
-
-        self.conv = nn.Conv2d(self.in_channel, self.out_channel, self.kernel_size, 1, self.padding, bias=False)
-        if self.to_rgb:  # is it to_rgb layer
-            kaiming_normal(self.conv.weight, a=1.0)
-        else:
-            self.lrelu = nn.LeakyReLU(negative_slope=0.2, inplace=True)
-            kaiming_normal(self.conv.weight, a=0.2)
-            self.norm = PixelNormLayer()
-        self.ws = WScaleLayer(self.conv)
-        
-        if self.to_rgb:
-            self.feature = nn.Sequential(self.conv, self.ws)
-        else:
-            self.feature = nn.Sequential(self.conv, self.ws, self.lrelu, self.norm)
-
-    def forward(self, x):
-        return self.feature(x)
-
-
-GConvBlock = ConvBlock
-DConvblock = ConvBlock
-
-
-class GSameResolution3LayerBlock(nn.Module): # 3 layers: a unsample layer/input layer + 2 conv layers
-    def __init__(self, in_channel, out_channel, channel=3, first_block=False, nks1=3, nks2=3):
-        super(GSameResolution3LayerBlock, self).__init__()
-        self.in_channel = in_channel
-        self.out_channel = out_channel
-        self.channel = channel
-        self.first_block = first_block
-        self.nks1 = nks1
-        self.nks2 = nks2
-
-        self.block = []
-        if self.first_block:
-            b = [GConvBlock(self.in_channel, self.out_channel, self.nks1, self.nks1-1)]
-        else:
-            b = [nn.Upsample(scale_factor=2, mode='nearest')]
-            b += [GConvBlock(self.in_channel, self.out_channel, self.nks1, 1)]
-        self.block += b
-        self.block += [GConvBlock(self.out_channel, self.out_channel, self.nks2, 1)]
-        self.feature = nn.Sequential(*self.block)
-
-    def forward(self, x, to_rgb=False):
-        x = self.feature(x)
-        return x
+	def __repr__(self):
+		return self.__class__.__name__ + '(averaging = %s)' % (self.averaging)
 
 
 class GDropLayer(nn.Module):
-    def __init__(self):
-        super(GDropLayer, self).__init__()
-        pass
+	def __init__(self, mode='mul', strength=0.4, axes=(0,1), normalize=False):
+		super(GDropLayer, self).__init__()
+		self.mode = mode.lower()
+		assert self.mode in ['mul', 'drop', 'prop'], 'Invalid GDropLayer mode'%mode
+		self.strength = strength
+		self.axes = [axes] if isinstance(axes, int) else list(axes)
+		self.normalize = normalize
+		self.gain = None
 
-    def forward(self, x):
-        pass
+	def forward(self, x, deterministic=False):
+		if deterministic or not self.strength:
+			return x
+
+		rnd_shape = [s if axis in self.axes else 1 for axis, s in enumerate(x.size())]  # [x.size(axis) for axis in self.axes]
+		if self.mode == 'drop':
+			p = 1 - self.strength
+			rnd = np.random.binomial(1, p=p, size=rnd_shape) / p
+		elif self.mode == 'mul':
+			rnd = (1 + self.strength) ** np.random.normal(size=rnd_shape)
+		else:
+			coef = self.strength * x.size(1) ** 0.5
+			rnd = np.random.normal(size=rnd_shape) * coef + 1
+
+		if self.normalize:
+			rnd = rnd / np.linalg.norm(rnd, keepdims=True)
+		rnd = Variable(torch.from_numpy(rnd).type(x.data.type()))
+		if x.is_cuda:
+			rnd = rnd.cuda()
+		return x * rnd
+
+	def __repr__(self):
+		param_str = '(mode = %s, strength = %s, axes = %s, normalize = %s)' % (self.mode, self.strength, self.axes, self.normalize)
+		return self.__class__.__name__ + param_str
 
 
-class Flatten(nn.Module):
-    def __init__(self):
-        super(Flatten, self).__init__()
+class LayerNormLayer(nn.Module):
+	def __init__(self, incoming, eps=1e-4):
+		super(LayerNormLayer, self).__init__()
+		self.incoming = incoming
+		self.eps = eps
+		self.gain = Parameter(torch.FloatTensor([1.0]), requires_grad=True)
+		self.bias = None
 
-    def forward(self, x):
-        return x.view(x.size(0), -1)
+		if self.incoming.bias is not None:
+			self.bias = self.incoming.bias
+			self.incoming.bias = None
+
+	def forward(self, x):
+		x = x - mean(x, axis=range(1, len(x.size())))
+		x = x * torch.inverse(torch.sqrt(mean(x**2, axis=range(1, len(x.size())), keepdim=True) + self.eps))
+		x = x * self.gain
+		if self.bias is not None:
+			x += self.bias
+		return x
+
+	def __repr__(self):
+		param_str = '(incoming = %s, eps = %s)' % (self.incoming.__class__.__name__, self.eps)
+		return self.__class__.__name__ + param_str
 
 
-class DDownsmple3LayerBlock(nn.Module): # 3 layers: 2 conv layers + a downsample layer, not counting minibatchstatconcat layer
-    def __init__(self, in_channel, out_channel, channel=3, last_block=False, nks1=3, nks2=3):
-        super(DDownsmple3LayerBlock, self).__init__()
-        self.in_channel = in_channel
-        self.out_channel = out_channel
-        self.channel = channel
-        self.last_block = last_block
-        self.nks1 = nks1
-        self.nks2 = nks2
+def resize_activations(v, so):
+	si = v.size()
+	assert len(si) == len(so) and si[0] == so[0]
 
-        self.block = []
-        if last_block:
-            self.block = [MinibatchStatConcatLayer('all')]
-            self.block += [DConvblock(self.in_channel+1, self.in_channel, self.nks1, 1)]
-            self.block += [DConvblock(self.in_channel, self.out_channel, self.nks2, 0)]  # output should be self.out_channel * 1 * 1, does not check here.
-            self.block += [Flatten(), nn.Linear(self.out_channel, 1)]
-        else:
-            self.block = [DConvblock(self.in_channel, self.in_channel, self.nks1, 1)]
-            self.block += [DConvblock(self.in_channel, self.out_channel, self.nks2, 1)]
-            self.block += [nn.AvgPool2d(2)]
-        self.feature = nn.Sequential(*self.block)
+	# Decrease feature maps.
+	if si[1] > so[1]:
+		v = v[:, :so[1]]
 
-    def forward(self, x):
-        return self.feature(x)
+	# Shrink spatial axes.
+	if len(si) == 4 and (si[2] > so[2] or si[3] > so[3]):
+		assert si[2] % so[2] == 0 and si[3] % so[3] == 0
+		ks = (si[2] / so[2], si[3] / so[3])
+		v = F.avg_pool2d(v, kernel_size=ks, stride=ks, ceil_mode=False, padding=0, count_include_pad=False)
+
+	# Extend spatial axes.
+	shape = [si[0]]
+	for i in range(2, len(si)):
+		if si[i] < so[i]:
+			assert so[i] % si[i] == 0
+			shape += [so[i]]
+		else:
+			shape += [si[i]]
+	v = v.expand(*shape)
+
+	# Increase feature maps.
+	if si[1] < so[1]:
+		z = torch.zeros((v.shape[0], so[1] - si[1]) + so[2:])
+		v = torch.cat([v, z], 1)
+	return v
+
+
+class LODSelectLayer(nn.Module):
+	def __init__(self, pre, lods, nins, first_incoming_lod=0):
+		super(LODSelectLayer, self).__init__()
+		self.pre = pre
+		self.lods = lods
+		self.nins = nins
+		self.first_incoming_lod = first_incoming_lod
+
+	def forward(self, x, y=None, cur_lod=0, ref_idx=0, min_lod=None, max_lod=None):
+		# v = [resize_activations(input, x[self.ref_idx].size()) for input in x]
+		# lo = np.clip(int(np.floor(min_lod - self.first_incoming_lod)), 0, len(v)-1) if min_lod is not None else 0
+		# hi = np.clip(int(np.ceil(max_lod - self.first_incoming_lod)), lo, len(v)-1) if max_lod is not None else len(v)-1
+		# t = cur_lod - self.first_incoming_lod
+		# r = v[hi]
+		# for i in range(hi-1, lo-1, -1): # i = hi-1, hi-2, ..., lo
+		# 	if t < i+1:
+		# 		r = v[i] * ((i+1)-t) + v[i+1] * (t-i)
+		# if lo < hi:
+		# 	if t <= lo:
+		# 		r = v[lo]
+		# return r
+		v = []
+		if self.pre is not None:
+			x = self.pre(x)
+		for i in range(ref_idx):  # ref_idx: physical index
+			x = self.lods[i](x)
+			out = self.nins[i](x)
+			v += [out]
+		target_shape = v[-1].size()
+		t = cur_lod - self.first_incoming_lod  # cur_lod is float!
+		lo = np.clip(int(np.floor(min_lod - self.first_incoming_lod)), 0, len(v)-1) if min_lod is not None else 0
+		hi = np.clip(int(np.ceil(max_lod - self.first_incoming_lod)), lo, len(v)-1) if max_lod is not None else len(v)-1
+		r = v[hi]
+		for i in range(hi-1, lo-1, -1):
+			if t < i+1:
+				r = resize_activations(v[ref_idx-i+1], target_shape) * (i+1-t) + resize_activations(v[ref_idx-i+2], target_shape) * (t-i)
+		if lo < hi:
+			if t <= lo:
+				r = v[lo]
+		return r
+
+
+class ConcatLayer(nn.Module):
+	def __init__(self):
+		super(ConcatLayer, self).__init__()
+
+	def forward(self, x, y):
+		return torch.cat([x, y], 1)
+
+
+class ReshapeLayer(nn.Module):
+	def __init__(self, new_shape):
+		super(ReshapeLayer, self).__init__()
+		self.new_shape = new_shape  # not include minibatch dimension
+
+	def forward(self, x):
+		assert reduce(lambda u,v: u*v, self.new_shape) == reduce(x.size()[1:])
+		return x.view(-1, *self.new_shape)
+
+
+def he_init(layer, nonlinearity='conv2d', param=None):
+	nonlinearity = nonlinearity.lower()
+	if nonlinearity not in ['linear', 'conv1d', 'conv2d', 'conv3d', 'relu', 'leaky_relu', 'sigmoid', 'tanh']:
+		if not hasattr(layer, 'gain') or layer.gain is None:
+			gain = 0  # default
+		else:
+			gain = layer.gain
+	if nonlinearity == 'leaky_relu':
+		assert param is not None, 'Negative_slope(param) should be given.'
+		gain = calculate_gain(nonlinearity, param)
+	kaiming_normal(layer.weight, a=gain)
 
