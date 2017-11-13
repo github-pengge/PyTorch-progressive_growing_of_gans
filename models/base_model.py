@@ -1,18 +1,20 @@
 # -*- coding: utf-8 -*-
 import torch
 import torch.nn as nn
-from torch.autograd import Variable, Parameter
+from torch.autograd import Variable
+from torch.nn.parameter import Parameter
 from torch.nn import functional as F
 from torch.nn.init import kaiming_normal, calculate_gain
 import numpy as np
 import sys
-if sys.version.info.major == 3:
+if sys.version_info.major == 3:
 	from functools import reduce
 
 
 class PixelNormLayer(nn.Module):
 	def __init__(self, eps=1e-8):
 		super(PixelNormLayer, self).__init__()
+		self.eps = eps
 	
 	def forward(self, x):
 		return x / (torch.mean(x**2, dim=1, keepdim=True) + 1e-8) ** 0.5
@@ -25,8 +27,8 @@ class WScaleLayer(nn.Module):
 	def __init__(self, incoming):
 		super(WScaleLayer, self).__init__()
 		self.incoming = incoming
-		self.scale = torch.sqrt(torch.mean(self.incoming.weight.data ** 2))
-		self.incoming.weight = self.incoming.weight / self.scale
+		self.scale = (torch.mean(self.incoming.weight.data ** 2)) ** 0.5
+		self.incoming.weight.data.copy_(self.incoming.weight.data / self.scale)
 		self.bias = None
 		if self.incoming.bias is not None:
 			self.bias = self.incoming.bias
@@ -34,8 +36,8 @@ class WScaleLayer(nn.Module):
 
 	def forward(self, x):
 		x = self.scale * x
-		if self.bias:
-			x += self.bias
+		if self.bias is not None:
+			x += self.bias.view(1, self.bias.size()[0], 1, 1)
 		return x
 
 	def __repr__(self):
@@ -62,7 +64,7 @@ class MinibatchStatConcatLayer(nn.Module):
 		self.adjusted_std = lambda x, **kwargs: torch.sqrt(torch.mean((x - torch.mean(x, **kwargs)) ** 2, **kwargs) + 1e-8)
 
 	def forward(self, x):
-		shape = x.size()
+		shape = list(x.size())
 		target_shape = shape.copy()
 		vals = self.adjusted_std(x, dim=0, keepdim=True)
 		if self.averaging == 'all':
@@ -88,6 +90,16 @@ class MinibatchStatConcatLayer(nn.Module):
 
 	def __repr__(self):
 		return self.__class__.__name__ + '(averaging = %s)' % (self.averaging)
+
+
+class MinibatchDiscriminationLayer(nn.Module):
+	def __init__(self, num_kernels):
+		super(MinibatchDiscriminationLayer, self).__init__()
+		self.num_kernels = num_kernels
+
+	def forward(self, x):
+		pass
+
 
 
 class GDropLayer(nn.Module):
@@ -152,7 +164,8 @@ class LayerNormLayer(nn.Module):
 
 
 def resize_activations(v, so):
-	si = v.size()
+	si = list(v.size())
+	so = list(so)
 	assert len(si) == len(so) and si[0] == so[0]
 
 	# Decrease feature maps.
@@ -166,14 +179,14 @@ def resize_activations(v, so):
 		v = F.avg_pool2d(v, kernel_size=ks, stride=ks, ceil_mode=False, padding=0, count_include_pad=False)
 
 	# Extend spatial axes.
-	shape = [si[0]]
+	shape = [1, 1]
 	for i in range(2, len(si)):
 		if si[i] < so[i]:
 			assert so[i] % si[i] == 0
-			shape += [so[i]]
+			shape += [so[i] // si[i]]
 		else:
-			shape += [si[i]]
-	v = v.expand(*shape)
+			shape += [1]
+	v = v.repeat(*shape)
 
 	# Increase feature maps.
 	if si[1] < so[1]:
@@ -182,46 +195,138 @@ def resize_activations(v, so):
 	return v
 
 
-class LODSelectLayer(nn.Module):
-	def __init__(self, pre, lods, nins, first_incoming_lod=0):
-		super(LODSelectLayer, self).__init__()
-		self.pre = pre
-		self.lods = lods
-		self.nins = nins
-		self.first_incoming_lod = first_incoming_lod
+# class LODSelectLayer(nn.Module):
+# 	def __init__(self, pre, lods, nins, first_incoming_lod=0):
+# 		super(LODSelectLayer, self).__init__()
+# 		self.pre = pre
+# 		self.lods = lods
+# 		self.nins = nins
+# 		self.first_incoming_lod = first_incoming_lod
 
-	def forward(self, x, y=None, cur_lod=0, ref_idx=0, min_lod=None, max_lod=None):
-		# v = [resize_activations(input, x[self.ref_idx].size()) for input in x]
-		# lo = np.clip(int(np.floor(min_lod - self.first_incoming_lod)), 0, len(v)-1) if min_lod is not None else 0
-		# hi = np.clip(int(np.ceil(max_lod - self.first_incoming_lod)), lo, len(v)-1) if max_lod is not None else len(v)-1
-		# t = cur_lod - self.first_incoming_lod
-		# r = v[hi]
-		# for i in range(hi-1, lo-1, -1): # i = hi-1, hi-2, ..., lo
-		# 	if t < i+1:
-		# 		r = v[i] * ((i+1)-t) + v[i+1] * (t-i)
-		# if lo < hi:
-		# 	if t <= lo:
-		# 		r = v[lo]
-		# return r
-		v = []
+# 	def forward(self, x, y=None, cur_lod=0, ref_idx=0, min_lod=None, max_lod=None):
+# 		# v = [resize_activations(input, x[self.ref_idx].size()) for input in x]
+# 		# lo = np.clip(int(np.floor(min_lod - self.first_incoming_lod)), 0, len(v)-1) if min_lod is not None else 0
+# 		# hi = np.clip(int(np.ceil(max_lod - self.first_incoming_lod)), lo, len(v)-1) if max_lod is not None else len(v)-1
+# 		# t = cur_lod - self.first_incoming_lod
+# 		# r = v[hi]
+# 		# for i in range(hi-1, lo-1, -1): # i = hi-1, hi-2, ..., lo
+# 		# 	if t < i+1:
+# 		# 		r = v[i] * ((i+1)-t) + v[i+1] * (t-i)
+# 		# if lo < hi:
+# 		# 	if t <= lo:
+# 		# 		r = v[lo]
+# 		# return r
+# 		v = []
+# 		if self.pre is not None:
+# 			x = self.pre(x)
+# 		for i in range(ref_idx):  # ref_idx: physical index
+# 			if i == 0 and y is not None:
+# 				x = self.lods[i](x, y)
+# 			else:
+# 				x = self.lods[i](x)
+# 			out = self.nins[i](x)
+# 			v += [out]
+# 		target_shape = v[-1].size()
+# 		t = cur_lod - self.first_incoming_lod  # cur_lod is float!
+# 		lo = np.clip(int(np.floor(min_lod - self.first_incoming_lod)), 0, len(v)-1) if min_lod is not None else 0
+# 		hi = np.clip(int(np.ceil(max_lod - self.first_incoming_lod)), lo, len(v)-1) if max_lod is not None else len(v)-1
+# 		r = v[hi]
+# 		for i in range(hi-1, lo-1, -1):
+# 			if t < i+1:
+# 				r = resize_activations(v[ref_idx-i+1], target_shape) * (i+1-t) + resize_activations(v[ref_idx-i+2], target_shape) * (t-i)
+# 		if lo < hi:
+# 			if t <= lo:
+# 				r = v[lo]
+# 		return r
+
+
+class GSelectLayer(nn.Module):
+	def __init__(self, pre, chain, post):
+		super(GSelectLayer, self).__init__()
+		assert len(chain) == len(post)
+		self.pre = pre
+		self.chain = chain
+		self.post = post
+		self.N = len(self.chain)
+
+	def forward(self, x, y=None, cur_level=None, insert_y_at=None):
+		if cur_level is None:
+			cur_level = self.N  # cur_level: physical index
+		if y is not None:
+			assert insert_y_at is not None
+
+		min_level, max_level = int(np.floor(cur_level-1)), int(np.ceil(cur_level-1))
+		min_level_weight, max_level_weight = max_level-cur_level, min_level+1-cur_level
+
+		_from, _to, _step = 0, max_level+1, 1
+
 		if self.pre is not None:
 			x = self.pre(x)
-		for i in range(ref_idx):  # ref_idx: physical index
-			x = self.lods[i](x)
-			out = self.nins[i](x)
-			v += [out]
-		target_shape = v[-1].size()
-		t = cur_lod - self.first_incoming_lod  # cur_lod is float!
-		lo = np.clip(int(np.floor(min_lod - self.first_incoming_lod)), 0, len(v)-1) if min_lod is not None else 0
-		hi = np.clip(int(np.ceil(max_lod - self.first_incoming_lod)), lo, len(v)-1) if max_lod is not None else len(v)-1
-		r = v[hi]
-		for i in range(hi-1, lo-1, -1):
-			if t < i+1:
-				r = resize_activations(v[ref_idx-i+1], target_shape) * (i+1-t) + resize_activations(v[ref_idx-i+2], target_shape) * (t-i)
-		if lo < hi:
-			if t <= lo:
-				r = v[lo]
-		return r
+
+		out = {}
+		print('G: level=%s, size=%s' % ('in', x.size()))
+		for level in range(_from, _to, _step):
+			if level == insert_y_at:
+				x = self.chain[level](x, y)
+			else:
+				x = self.chain[level](x)
+
+			print('G: level=%d, size=%s' % (level, x.size()))
+
+			if level == min_level:
+				out['min_level'] = self.post[level](x)
+			if level == max_level:
+				out['max_level'] = self.post[level](x)
+				x = resize_activations(out['min_level'], out['max_level'].size()) * min_level_weight + \
+						out['max_level'] * max_level_weight
+		return x
+
+
+class DSelectLayer(nn.Module):
+	def __init__(self, pre, chain, inputs):
+		super(DSelectLayer, self).__init__()
+		assert len(chain) == len(inputs)
+		self.pre = pre
+		self.chain = chain
+		self.inputs = inputs
+		self.N = len(self.chain)
+
+	def forward(self, x, y=None, cur_level=None, insert_y_at=None):
+		if cur_level is None:
+			cur_level = self.N  # cur_level: physical index
+		if y is not None:
+			assert insert_y_at is not None
+
+		max_level, min_level = int(np.floor(self.N-cur_level)), int(np.ceil(self.N-cur_level))
+		min_level_weight, max_level_weight = int(cur_level+1)-cur_level, cur_level-int(cur_level)
+
+		_from, _to, _step = max_level, self.N, 1
+
+		if self.pre is not None:
+			x = self.pre(x)
+
+		out = {}
+		print('D: level=%s, size=%s' % ('in', x.size()))
+		for level in range(_from, _to, _step):
+			if level == max_level:
+				tmp = self.inputs[level](x)
+				if level == insert_y_at:
+					tmp = self.chain[level](tmp, y)
+				else:
+					tmp = self.chain[level](tmp)
+				out['max_level'] = tmp
+				continue
+			if level == min_level:
+				out['min_level'] = self.inputs[level](x)
+				x = resize_activations(out['min_level'], out['max_level'].size()) * min_level_weight + \
+						out['max_level'] * max_level_weight
+			if level == insert_y_at:
+				x = self.chain[level](x, y)
+			else:
+				x = self.chain[level](x)
+			print('D: level=%d, size=%s' % (level, x.size()))
+
+		return x
 
 
 class ConcatLayer(nn.Module):
@@ -238,7 +343,7 @@ class ReshapeLayer(nn.Module):
 		self.new_shape = new_shape  # not include minibatch dimension
 
 	def forward(self, x):
-		assert reduce(lambda u,v: u*v, self.new_shape) == reduce(x.size()[1:])
+		assert reduce(lambda u,v: u*v, self.new_shape) == reduce(lambda u,v: u*v, x.size()[1:])
 		return x.view(-1, *self.new_shape)
 
 
@@ -249,8 +354,10 @@ def he_init(layer, nonlinearity='conv2d', param=None):
 			gain = 0  # default
 		else:
 			gain = layer.gain
-	if nonlinearity == 'leaky_relu':
+	elif nonlinearity == 'leaky_relu':
 		assert param is not None, 'Negative_slope(param) should be given.'
 		gain = calculate_gain(nonlinearity, param)
+	else:
+		gain = calculate_gain(nonlinearity)
 	kaiming_normal(layer.weight, a=gain)
 
