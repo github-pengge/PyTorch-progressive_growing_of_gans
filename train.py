@@ -80,14 +80,14 @@ class PGGAN():
 		return d.data[0] if isinstance(d, Variable) else d
 
 	def compute_G_loss(self):
-		g_adv_loss = self.compute_adv_loss(self.fake, True, 1)
+		g_adv_loss = self.compute_adv_loss(self.d_fake, True, 1)
 		g_add_loss = self.compute_additional_g_loss()
 		self.g_adv_loss = self._get_data(g_adv_loss)
 		self.g_add_loss = self._get_data(g_add_loss)
 		return g_adv_loss + g_add_loss
 
 	def compute_D_loss(self):
-		d_adv_loss = self.compute_adv_loss(self.real, True, 0.5) + self.compute_adv_loss(self.fake, False, 0.5)
+		d_adv_loss = self.compute_adv_loss(self.d_real, True, 0.5) + self.compute_adv_loss(self.d_fake, False, 0.5)
 		d_add_loss = self.compute_additional_d_loss()
 		self.d_adv_loss = self._get_data(d_adv_loss)
 		self.d_add_loss = self._get_data(d_add_loss)
@@ -123,10 +123,10 @@ class PGGAN():
 	def forward_G(self, cur_level):
 		self.d_fake = self.D(self.fake, cur_level=cur_level)
 	
-	def forward_D(self, cur_level):
+	def forward_D(self, cur_level, detach=True):
 		self.fake = self.G(self.z, cur_level=cur_level)
 		self.d_real = self.D(self.add_noise(self.real), cur_level=cur_level)
-		self.d_fake = self.D(self.fake, cur_level=cur_level)
+		self.d_fake = self.D(self.fake.detach() if detach else self.fake, cur_level=cur_level)
 		# print('d_real', self.d_real.view(-1))
 		# print('d_fake', self.d_fake.view(-1))
 		# print(self.fake[0].view(-1))
@@ -178,13 +178,12 @@ class PGGAN():
 
 				# preprocess
 				self.preprocess(z, x)
-				
-				# forward
-				self.forward_D(cur_level)  # TODO: feed gdrop_strength
 
 				# update D
+				# from IPython import embed; embed(); exit()
 				self.optim_D.zero_grad()
-				self.backward_D(retain_graph=True)
+				self.forward_D(cur_level, detach=True)  # TODO: feed gdrop_strength
+				self.backward_D()
 
 				# update G
 				self.optim_G.zero_grad()
