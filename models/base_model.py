@@ -10,6 +10,8 @@ import sys
 if sys.version_info.major == 3:
 	from functools import reduce
 
+DEBUG = False
+
 
 class PixelNormLayer(nn.Module):
 	def __init__(self, eps=1e-8):
@@ -175,7 +177,7 @@ def resize_activations(v, so):
 	# Shrink spatial axes.
 	if len(si) == 4 and (si[2] > so[2] or si[3] > so[3]):
 		assert si[2] % so[2] == 0 and si[3] % so[3] == 0
-		ks = (si[2] / so[2], si[3] / so[3])
+		ks = (si[2] // so[2], si[3] // so[3])
 		v = F.avg_pool2d(v, kernel_size=ks, stride=ks, ceil_mode=False, padding=0, count_include_pad=False)
 
 	# Extend spatial axes.
@@ -264,14 +266,16 @@ class GSelectLayer(nn.Module):
 			x = self.pre(x)
 
 		out = {}
-		print('G: level=%s, size=%s' % ('in', x.size()))
+		if DEBUG:
+			print('G: level=%s, size=%s' % ('in', x.size()))
 		for level in range(_from, _to, _step):
 			if level == insert_y_at:
 				x = self.chain[level](x, y)
 			else:
 				x = self.chain[level](x)
 
-			print('G: level=%d, size=%s' % (level, x.size()))
+			if DEBUG:
+				print('G: level=%d, size=%s' % (level, x.size()))
 
 			if level == min_level:
 				out['min_level'] = self.post[level](x)
@@ -279,6 +283,8 @@ class GSelectLayer(nn.Module):
 				out['max_level'] = self.post[level](x)
 				x = resize_activations(out['min_level'], out['max_level'].size()) * min_level_weight + \
 						out['max_level'] * max_level_weight
+		if DEBUG:
+			print('G:', x.size())
 		return x
 
 
@@ -300,32 +306,44 @@ class DSelectLayer(nn.Module):
 		max_level, min_level = int(np.floor(self.N-cur_level)), int(np.ceil(self.N-cur_level))
 		min_level_weight, max_level_weight = int(cur_level+1)-cur_level, cur_level-int(cur_level)
 
-		_from, _to, _step = max_level, self.N, 1
+		_from, _to, _step = min_level+1, self.N, 1
 
 		if self.pre is not None:
 			x = self.pre(x)
 
-		out = {}
-		print('D: level=%s, size=%s' % ('in', x.size()))
+		if DEBUG:
+			print('D: level=%s, size=%s, max_level=%s, min_level=%s' % ('in', x.size(), max_level, min_level))
+
+		if max_level == min_level:
+			x = self.inputs[max_level](x)
+			if max_level == insert_y_at:
+				x = self.chain[max_level](x, y)
+			else:
+				x = self.chain[max_level](x)
+		else:
+			out = {}
+			tmp = self.inputs[max_level](x)
+			if max_level == insert_y_at:
+				tmp = self.chain[max_level](tmp, y)
+			else:
+				tmp = self.chain[max_level](tmp)
+			out['max_level'] = tmp
+			out['min_level'] = self.inputs[min_level](x)
+			x = resize_activations(out['min_level'], out['max_level'].size()) * min_level_weight + \
+								out['max_level'] * max_level_weight
+			if min_level == insert_y_at:
+				x = self.chain[min_level](x, y)
+			else:
+				x = self.chain[min_level](x)
+
 		for level in range(_from, _to, _step):
-			if level == max_level:
-				tmp = self.inputs[level](x)
-				if level == insert_y_at:
-					tmp = self.chain[level](tmp, y)
-				else:
-					tmp = self.chain[level](tmp)
-				out['max_level'] = tmp
-				continue
-			if level == min_level:
-				out['min_level'] = self.inputs[level](x)
-				x = resize_activations(out['min_level'], out['max_level'].size()) * min_level_weight + \
-						out['max_level'] * max_level_weight
 			if level == insert_y_at:
 				x = self.chain[level](x, y)
 			else:
 				x = self.chain[level](x)
-			print('D: level=%d, size=%s' % (level, x.size()))
 
+			if DEBUG:
+				print('D: level=%d, size=%s' % (level, x.size()))
 		return x
 
 

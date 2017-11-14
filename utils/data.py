@@ -4,7 +4,7 @@ from glob import glob
 import numpy as np 
 
 
-prefix = '/data/rui.wu/gapeng/fader_nets/datasets/'
+prefix = './datasets/'
 
 def get_img(img_path, is_crop=True, crop_h=256, resize_h=64, normalize=False):
 	img = scipy.misc.imread(img_path, mode='RGB').astype(np.float)
@@ -18,16 +18,14 @@ def get_img(img_path, is_crop=True, crop_h=256, resize_h=64, normalize=False):
 	else:
 		cropped_image = scipy.misc.imresize(img,[resize_h, resize_w])
 	if normalize:
-		cropped_image = cropped_image/255.0
+		cropped_image = cropped_image/127.5 - 1.0
 	return np.transpose(cropped_image, [2, 0, 1])
 
 
 class CelebA():
-	def __init__(self, shuffle=False):
-		datapath = os.path.join(prefix, 'celeba/img_align_celeba')
-		self.z_dim = 100
+	def __init__(self):
+		datapath = os.path.join(prefix, 'celeba/aligned')
 		self.channel = 3
-		self.shuffle = shuffle
 		self.data = glob(os.path.join(datapath, '*.jpg'))
 
 	def __call__(self, batch_size, size):

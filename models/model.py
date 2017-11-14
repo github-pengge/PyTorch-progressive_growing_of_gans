@@ -180,7 +180,8 @@ class Discriminator(nn.Module):
 						self.use_wscale, self.use_gdrop, self.use_layernorm, gdrop_param)
 			net += [nn.AvgPool2d(kernel_size=2, stride=2, ceil_mode=False, count_include_pad=False)]
 			lods.append(nn.Sequential(*net))
-			nin = [nn.AvgPool2d(kernel_size=2**(R-I), stride=2**(R-I), ceil_mode=False, count_include_pad=False)]
+			# nin = [nn.AvgPool2d(kernel_size=2, stride=2, ceil_mode=False, count_include_pad=False)]
+			nin = []
 			nin = NINLayer(nin, self.num_channels, oc, act, iact, negative_slope, True, self.use_wscale)
 			nins.append(nin)
 
