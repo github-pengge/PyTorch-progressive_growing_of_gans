@@ -59,7 +59,7 @@ class PGGAN():
     def create_criterion(self):
         # w is for gan
         if self.opts['gan'] == 'lsgan':
-            self.adv_criterion = lambda p,t,w: w*torch.mean((torch.sigmoid(p)-t)**2)  # sigmoid is applied here
+            self.adv_criterion = lambda p,t,w: torch.mean((torch.sigmoid(p)-t)**2)  # sigmoid is applied here
         elif self.opts['gan'] == 'wgan_gp':
             self.adv_criterion = lambda p,t,w: (-2*t+1) * torch.mean(p)
         elif self.opts['gan'] == 'gan':

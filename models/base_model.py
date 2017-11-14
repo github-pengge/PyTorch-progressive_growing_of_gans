@@ -258,8 +258,8 @@ class GSelectLayer(nn.Module):
             assert insert_y_at is not None
 
         min_level, max_level = int(np.floor(cur_level-1)), int(np.ceil(cur_level-1))
-        min_level_weight, max_level_weight = max_level-cur_level, min_level+1-cur_level
-
+        min_level_weight, max_level_weight = int(cur_level+1)-cur_level, cur_level-int(cur_level)
+        
         _from, _to, _step = 0, max_level+1, 1
 
         if self.pre is not None:
@@ -305,7 +305,7 @@ class DSelectLayer(nn.Module):
 
         max_level, min_level = int(np.floor(self.N-cur_level)), int(np.ceil(self.N-cur_level))
         min_level_weight, max_level_weight = int(cur_level+1)-cur_level, cur_level-int(cur_level)
-
+        
         _from, _to, _step = min_level+1, self.N, 1
 
         if self.pre is not None:
