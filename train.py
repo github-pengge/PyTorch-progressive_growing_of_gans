@@ -59,11 +59,11 @@ class PGGAN():
     def create_criterion(self):
         # w is for gan
         if self.opts['gan'] == 'lsgan':
-            self.adv_criterion = lambda p,t,w: torch.mean((torch.sigmoid(p)-t)**2)  # sigmoid is applied here
+            self.adv_criterion = lambda p,t,w: torch.mean((p-t)**2)  # sigmoid is applied here
         elif self.opts['gan'] == 'wgan_gp':
             self.adv_criterion = lambda p,t,w: (-2*t+1) * torch.mean(p)
         elif self.opts['gan'] == 'gan':
-            self.adv_criterion = lambda p,t,w: -w*torch.mean(t*torch.log(torch.sigmoid(p)+1e-8) + (1-t)*torch.log(1-torch.sigmoid(p)+1e-8))
+            self.adv_criterion = lambda p,t,w: -w*torch.mean(t*torch.log(p+1e-8) + (1-t)*torch.log(1-p+1e-8))
         else:
             raise ValueError('Invalid/Unsupported GAN: %s.' % self.opts['gan'])
 
@@ -180,7 +180,6 @@ class PGGAN():
                 self.preprocess(z, x)
 
                 # update D
-                # from IPython import embed; embed(); exit()
                 self.optim_D.zero_grad()
                 self.forward_D(cur_level, detach=True)  # TODO: feed gdrop_strength
                 self.backward_D()
@@ -192,7 +191,7 @@ class PGGAN():
 
                 # report 
                 self.report(it, _num_it, phase)
-
+                
                 cur_nimg += batch_size
 
                 # sampling
@@ -207,7 +206,7 @@ class PGGAN():
         batch_size = self.z.size(0)
         n_row = self.rows_map[batch_size]
         n_col = int(np.ceil(batch_size / float(n_row)))
-        white_space = np.ones((self.real.size(1), self.real.size(2), 5))
+        white_space = np.ones((self.real.size(1), self.real.size(2), 3))
         samples = []
         i = j = 0
         for row in range(n_row):
@@ -242,7 +241,7 @@ if __name__ == '__main__':
     parser.add_argument('--lr', default=1e-3, type=float, help='learning rate')
     parser.add_argument('--beta1', default=0, type=float, help='beta1 for adam')
     parser.add_argument('--beta2', default=0.99, type=float, help='beta2 for adam')
-    parser.add_argument('--gan', default='lsgan', type=str, help='model: lsgan/wgan_gp')
+    parser.add_argument('--gan', default='lsgan', type=str, help='model: lsgan/wgan_gp/gan')
     parser.add_argument('--first_resol', default=4, type=int, help='first resolution')
     parser.add_argument('--target_resol', default=256, type=int, help='target resolution')
     parser.add_argument('--drift', default=1e-3, type=float, help='drift, only available for wgan_gp.')
@@ -257,9 +256,10 @@ if __name__ == '__main__':
     opts = {k:v for k,v in args._get_kwargs()}
 
     latent_size = 512
+    sigmoid_at_end = args.gan in ['lsgan', 'gan']
 
     G = Generator(num_channels=3, latent_size=latent_size, resolution=args.target_resol, fmap_max=512, fmap_base=8192, tanh_at_end=True)
-    D = Discriminator(num_channels=3, resolution=args.target_resol, fmap_max=512, fmap_base=8192)
+    D = Discriminator(num_channels=3, resolution=args.target_resol, fmap_max=512, fmap_base=8192, sigmoid_at_end=sigmoid_at_end)
     print(G)
     print(D)
     data = CelebA()

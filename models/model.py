@@ -143,7 +143,8 @@ class Discriminator(nn.Module):
                 mbdisc_kernels  = None,
                 use_wscale      = True,
                 use_gdrop       = True,
-                use_layernorm   = False):
+                use_layernorm   = False,
+                sigmoid_at_end  = False):
         super(Discriminator, self).__init__()
         self.num_channels = num_channels
         self.resolution = resolution
@@ -156,6 +157,7 @@ class Discriminator(nn.Module):
         self.use_wscale = use_wscale
         self.use_gdrop = use_gdrop
         self.use_layernorm = use_layernorm
+        self.sigmoid_at_end = sigmoid_at_end
 
         R = int(np.log2(resolution))
         assert resolution == 2**R and resolution >= 4
@@ -164,6 +166,8 @@ class Discriminator(nn.Module):
         negative_slope = 0.2
         act = nn.LeakyReLU(negative_slope=negative_slope)
         iact = 'leaky_relu'
+        output_act = nn.Sigmoid() if self.sigmoid_at_end else 'linear'
+        output_iact = 'sigmoid' if self.sigmoid_at_end else 'linear'
         gdrop_param = {'mode': 'prop', 'strength': gdrop_strength}
 
         nins = nn.ModuleList()
@@ -199,7 +203,8 @@ class Discriminator(nn.Module):
             net += [MinibatchDiscriminationLayer(num_kernels=self.mbdisc_kernels)]
 
         oc = 1 + self.label_size
-        lods.append(NINLayer(net, self.get_nf(0), oc, 'linear', 'linear', None, True, self.use_wscale))
+        # lods.append(NINLayer(net, self.get_nf(0), oc, 'linear', 'linear', None, True, self.use_wscale))
+        lods.append(NINLayer(net, self.get_nf(0), oc, nn.Sigmoid(), 'sigmoid', None, True, self.use_wscale))
 
         self.output_layer = DSelectLayer(pre, lods, nins)
 
