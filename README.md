@@ -1,6 +1,8 @@
 # Progressive growing of GANs
 PyTorch implementation of [Progressive Growing of GANs for Improved Quality, Stability, and Variation](http://arxiv.org/abs/1710.10196). 
 
+**Update(20171115)**: Mode collapse happened when fading in, debugging...
+
 **Update(20171114)**: First version, seems that the generator tends to generate white image. Debugging now. => Fixed some bugs. Now seems normal, training... => There are some unknown problems when fading in, debugging...
 
 **Update(20171113)**: Generator and Discriminator: ok, simple test passed.
