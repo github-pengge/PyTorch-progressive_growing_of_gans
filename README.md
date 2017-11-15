@@ -1,7 +1,7 @@
 # Progressive growing of GANs
 PyTorch implementation of [Progressive Growing of GANs for Improved Quality, Stability, and Variation](http://arxiv.org/abs/1710.10196). 
 
-**Update(20171115)**: Mode collapse happened when fading in, debugging... => It turns out that unstable seems to be normal when fading in, after some more iterations, it gets better.
+**Update(20171115)**: Mode collapse happened when fading in, debugging... => It turns out that unstable seems to be normal when fading in, after some more iterations, it gets better. Now I'm not using the same noise adding trick as the paper suggested, however, it had been implemented, I will test it and plug it into the network.
 
 **Update(20171114)**: First version, seems that the generator tends to generate white image. Debugging now. => Fixed some bugs. Now seems normal, training... => There are some unknown problems when fading in, debugging...
 
