@@ -197,51 +197,6 @@ def resize_activations(v, so):
     return v
 
 
-# class LODSelectLayer(nn.Module):
-#   def __init__(self, pre, lods, nins, first_incoming_lod=0):
-#       super(LODSelectLayer, self).__init__()
-#       self.pre = pre
-#       self.lods = lods
-#       self.nins = nins
-#       self.first_incoming_lod = first_incoming_lod
-
-#   def forward(self, x, y=None, cur_lod=0, ref_idx=0, min_lod=None, max_lod=None):
-#       # v = [resize_activations(input, x[self.ref_idx].size()) for input in x]
-#       # lo = np.clip(int(np.floor(min_lod - self.first_incoming_lod)), 0, len(v)-1) if min_lod is not None else 0
-#       # hi = np.clip(int(np.ceil(max_lod - self.first_incoming_lod)), lo, len(v)-1) if max_lod is not None else len(v)-1
-#       # t = cur_lod - self.first_incoming_lod
-#       # r = v[hi]
-#       # for i in range(hi-1, lo-1, -1): # i = hi-1, hi-2, ..., lo
-#       #   if t < i+1:
-#       #       r = v[i] * ((i+1)-t) + v[i+1] * (t-i)
-#       # if lo < hi:
-#       #   if t <= lo:
-#       #       r = v[lo]
-#       # return r
-#       v = []
-#       if self.pre is not None:
-#           x = self.pre(x)
-#       for i in range(ref_idx):  # ref_idx: physical index
-#           if i == 0 and y is not None:
-#               x = self.lods[i](x, y)
-#           else:
-#               x = self.lods[i](x)
-#           out = self.nins[i](x)
-#           v += [out]
-#       target_shape = v[-1].size()
-#       t = cur_lod - self.first_incoming_lod  # cur_lod is float!
-#       lo = np.clip(int(np.floor(min_lod - self.first_incoming_lod)), 0, len(v)-1) if min_lod is not None else 0
-#       hi = np.clip(int(np.ceil(max_lod - self.first_incoming_lod)), lo, len(v)-1) if max_lod is not None else len(v)-1
-#       r = v[hi]
-#       for i in range(hi-1, lo-1, -1):
-#           if t < i+1:
-#               r = resize_activations(v[ref_idx-i+1], target_shape) * (i+1-t) + resize_activations(v[ref_idx-i+2], target_shape) * (t-i)
-#       if lo < hi:
-#           if t <= lo:
-#               r = v[lo]
-#       return r
-
-
 class GSelectLayer(nn.Module):
     def __init__(self, pre, chain, post):
         super(GSelectLayer, self).__init__()

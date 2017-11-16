@@ -116,6 +116,17 @@ class PGGAN():
         noise = self._numpy2var(np.random.randn(*x.size()).astype(np.float32) * strength)
         return x + noise
 
+    def compute_noise_strength(self):
+        if self.opts.get('no_noise', False):
+            return 0
+
+        if hasattr(self, '_d_'):
+            self._d_ = self._d_ * 0.9 + torch.mean(self.d_real).data[0] * 0.1
+        else:
+            self._d_ = 0.0
+        strength = 0.2 * max(0, self._d_ - 0.5)**2
+        return strength
+
     def preprocess(self, z, real):
         self.z = self._numpy2var(z)
         self.real = self._numpy2var(real)
@@ -125,7 +136,8 @@ class PGGAN():
     
     def forward_D(self, cur_level, detach=True):
         self.fake = self.G(self.z, cur_level=cur_level)
-        self.d_real = self.D(self.add_noise(self.real), cur_level=cur_level)
+        strength = self.compute_noise_strength()
+        self.d_real = self.D(self.real, cur_level=cur_level, gdrop_strength=strength)
         self.d_fake = self.D(self.fake.detach() if detach else self.fake, cur_level=cur_level)
         # print('d_real', self.d_real.view(-1))
         # print('d_fake', self.d_fake.view(-1))

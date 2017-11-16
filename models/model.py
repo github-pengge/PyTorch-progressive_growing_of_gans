@@ -212,5 +212,7 @@ class Discriminator(nn.Module):
         return min(int(self.fmap_base / (2.0 ** (stage * self.fmap_decay))), self.fmap_max)
 
     def forward(self, x, y=None, cur_level=None, insert_y_at=None, gdrop_strength=0.0):
-        self.__dict__['strength'] = gdrop_strength  # update gdrop_strength
+        for module in self.modules():
+            if hasattr(module, 'strength'):
+                module.strength = gdrop_strength
         return self.output_layer(x, y, cur_level, insert_y_at)
