@@ -5,6 +5,7 @@ PyTorch implementation of [Progressive Growing of GANs for Improved Quality, Sta
 
 <p align="center">
   <img src="/samples/64x64-fade_in-060000.png">
+  <img src="/samples/64x64-fade_in-072500.png">
 </p>
 
 * **Update(20171115)**: Mode collapse happened when fading in, debugging... => It turns out that unstable seems to be normal when fading in, after some more iterations, it gets better. Now I'm not using the same noise adding trick as the paper suggested, however, it had been implemented, I will test it and plug it into the network.
