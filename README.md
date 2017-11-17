@@ -1,14 +1,16 @@
 # Progressive growing of GANs
 PyTorch implementation of [Progressive Growing of GANs for Improved Quality, Stability, and Variation](http://arxiv.org/abs/1710.10196). 
 
-* **Update(20171117)**: 64x64 stabilize results(first 2 columns on the left were generated, and the other 2 columns were taken from dataset):
+* **Update(20171117)**: 128x128 fade in results(first 2 columns on the left were generated, and the other 2 columns were taken from dataset):
 
 <p align="center">
-  <img src="/samples/64x64-stabilize-060000.png">
+  <img src="/samples/128x128-fade_in-134500.png">
 </p>
 <p align="center">
-  <img src="/samples/64x64-stabilize-060500.png">
+  <img src="/samples/128x128-fade_in-135000.png">
 </p>
+
+**Setup for the results above**: see `train_no_tanh.py` scipt for details(with default options).
 
 * **Update(20171116)**: Adding noise only to RGB images might still collapse. Switching to the same trick as the paper suggested. Besides, the paper used `linear` as activation of G's output layer, which is reasonable, as I observed in the experiments. Temporary results: 64x64, phase=fade in, the left 4 columns are Generated, and the right 4 columns are from real samples(when fading in, instability might occur, for example, the following results is not so promising, however, as the training goes, it gets better), higher resolution will be available soon.
 
