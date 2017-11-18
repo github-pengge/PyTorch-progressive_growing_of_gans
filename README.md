@@ -3,6 +3,15 @@ PyTorch implementation of [Progressive Growing of GANs for Improved Quality, Sta
 
 To obtain the similar results in `samples` directory, see `train_no_tanh.py` scipt for details(with default options).
 
+* **Update(20171119)**: Unstable came from `resize_activation` function, after replacing `repeat` by `torch.nn.functional.upsample`, problem solved. **And now I believe that both `train.py` and `train_no_tanh` should be stable**. Restored from 128x128 stabilize, and continued training, currently at 256x256, phase = fade in, temporary results(first 2 columns on the left were generated, and the other 2 columns were taken from dataset):
+
+<p align="center">
+  <img src="/samples/256x256-fade_in-092000.png">
+</p>
+<p align="center">
+  <img src="/samples/256x256-fade_in-092500">
+</p>
+
 * **Update(20171118)**: Making mistake in `resize activation` function(`repeat` is not a right in this function), though it's wrong, it's still effective when resolution<256, but collapsed at resolution>=256. Changing it now, scripts will be updated tomorrow. Sorry for this mistake.
 
 * **Update(20171117)**: 128x128 fade in results(first 2 columns on the left were generated, and the other 2 columns were taken from dataset):
