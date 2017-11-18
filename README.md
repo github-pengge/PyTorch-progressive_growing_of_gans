@@ -9,7 +9,7 @@ To obtain the similar results in `samples` directory, see `train_no_tanh.py` sci
   <img src="/samples/256x256-fade_in-092000.png">
 </p>
 <p align="center">
-  <img src="/samples/256x256-fade_in-092500">
+  <img src="/samples/256x256-fade_in-092500.png">
 </p>
 
 * **Update(20171118)**: Making mistake in `resize activation` function(`repeat` is not a right in this function), though it's wrong, it's still effective when resolution<256, but collapsed at resolution>=256. Changing it now, scripts will be updated tomorrow. Sorry for this mistake.
