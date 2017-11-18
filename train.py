@@ -155,9 +155,9 @@ class PGGAN():
         self.optim_D.step()
         self.d_loss = self._get_data(d_loss)
 
-    def report(self, it, num_it, phase):
-        formation = 'Iter[%d|%d], %s, G: %.3f, D: %.3f, G_adv: %.3f, G_add: %.3f, D_adv: %.3f, D_add: %.3f'
-        values = (it, num_it, phase, self.g_loss, self.d_loss, self.g_adv_loss, self.g_add_loss, self.d_adv_loss, self.d_add_loss)
+    def report(self, it, num_it, phase, resol):
+        formation = 'Iter[%d|%d], %s, %s, G: %.3f, D: %.3f, G_adv: %.3f, G_add: %.3f, D_adv: %.3f, D_add: %.3f'
+        values = (it, num_it, phase, resol, self.g_loss, self.d_loss, self.g_adv_loss, self.g_add_loss, self.d_adv_loss, self.d_add_loss)
         print(formation % values)
 
     def train(self):
@@ -171,10 +171,12 @@ class PGGAN():
         assert 2**to_level == self.opts['target_resol'] and 2**from_level == self.opts['first_resol'] and to_level >= from_level >= 2
         cur_level = from_level
 
-        for R in range(from_level-1, to_level-1):
+        for R in range(from_level-1, to_level):
             batch_size = self.bs_map[2 ** (R+1)]
             train_kimg = int(self.opts['train_kimg'] * 1000)
             transition_kimg = int(self.opts['transition_kimg'] * 1000)
+            if R == to_level-1:
+                transition_kimg = 0
             cur_nimg = 0
             _len = len(str(train_kimg + transition_kimg))
             _num_it = (train_kimg + transition_kimg) // batch_size

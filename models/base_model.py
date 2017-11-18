@@ -180,15 +180,18 @@ def resize_activations(v, so):
         ks = (si[2] // so[2], si[3] // so[3])
         v = F.avg_pool2d(v, kernel_size=ks, stride=ks, ceil_mode=False, padding=0, count_include_pad=False)
 
-    # Extend spatial axes.
-    shape = [1, 1]
-    for i in range(2, len(si)):
-        if si[i] < so[i]:
-            assert so[i] % si[i] == 0
-            shape += [so[i] // si[i]]
-        else:
-            shape += [1]
-    v = v.repeat(*shape)
+    # Extend spatial axes. Below is a wrong implementation
+    # shape = [1, 1]
+    # for i in range(2, len(si)):
+    #     if si[i] < so[i]:
+    #         assert so[i] % si[i] == 0
+    #         shape += [so[i] // si[i]]
+    #     else:
+    #         shape += [1]
+    # v = v.repeat(*shape)
+    if si[2] < so[2]: 
+        assert so[2] % si[2] == 0 and so[2] / si[2] == so[3] / si[3]  # currently only support this case
+        v = F.upsample(v, scale_factor=so[2]//si[2], mode='nearest')
 
     # Increase feature maps.
     if si[1] < so[1]:
