@@ -65,8 +65,8 @@ class PGGAN():
             self.adv_criterion = lambda p,t,w: torch.mean((p-t)**2)  # sigmoid is applied here
         elif self.opts['gan'] == 'wgan_gp':
             self.adv_criterion = lambda p,t,w: (-2*t+1) * torch.mean(p)
-        # elif self.opts['gan'] == 'gan':
-        #     self.adv_criterion = lambda p,t,w: -w*(torch.mean(t*torch.log(p+1e-8)) + torch.mean((1-t)*torch.log(1-p+1e-8)))
+        elif self.opts['gan'] == 'gan':
+            self.adv_criterion = lambda p,t,w: -w*(torch.mean(t*torch.log(p+1e-8)) + torch.mean((1-t)*torch.log(1-p+1e-8)))
         else:
             raise ValueError('Invalid/Unsupported GAN: %s.' % self.opts['gan'])
 
@@ -258,7 +258,7 @@ if __name__ == '__main__':
     parser.add_argument('--lr', default=1e-3, type=float, help='learning rate')
     parser.add_argument('--beta1', default=0, type=float, help='beta1 for adam')
     parser.add_argument('--beta2', default=0.99, type=float, help='beta2 for adam')
-    parser.add_argument('--gan', default='lsgan', type=str, help='model: lsgan/wgan_gp/gan')
+    parser.add_argument('--gan', default='lsgan', type=str, help='model: lsgan/wgan_gp/gan, currently only support lsgan or gan with no_noise option.')
     parser.add_argument('--first_resol', default=4, type=int, help='first resolution')
     parser.add_argument('--target_resol', default=256, type=int, help='target resolution')
     parser.add_argument('--drift', default=1e-3, type=float, help='drift, only available for wgan_gp.')
