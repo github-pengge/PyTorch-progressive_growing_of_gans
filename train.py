@@ -204,7 +204,7 @@ class PGGAN():
                 self.backward_G()
 
                 # report 
-                self.report(it, _num_it, phase)
+                self.report(it, _num_it, phase, cur_resol)
                 
                 cur_nimg += batch_size
 
