@@ -62,8 +62,8 @@ class PGGAN():
             self.adv_criterion = lambda p,t,w: torch.mean((p-t)**2)  # sigmoid is applied here
         elif self.opts['gan'] == 'wgan_gp':
             self.adv_criterion = lambda p,t,w: (-2*t+1) * torch.mean(p)
-        elif self.opts['gan'] == 'gan':
-            self.adv_criterion = lambda p,t,w: -w*torch.mean(t*torch.log(p+1e-8) + (1-t)*torch.log(1-p+1e-8))
+        # elif self.opts['gan'] == 'gan':
+        #     lambda p,t,w: -w*(torch.mean(t*torch.log(p+1e-8)) + torch.mean((1-t)*torch.log(1-p+1e-8)))
         else:
             raise ValueError('Invalid/Unsupported GAN: %s.' % self.opts['gan'])
 
