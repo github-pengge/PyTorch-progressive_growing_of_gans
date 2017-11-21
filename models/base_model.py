@@ -29,15 +29,17 @@ class WScaleLayer(nn.Module):
     def __init__(self, incoming):
         super(WScaleLayer, self).__init__()
         self.incoming = incoming
-        self.scale = (torch.mean(self.incoming.weight.data ** 2)) ** 0.5
-        self.incoming.weight.data.copy_(self.incoming.weight.data / self.scale)
+        # self.scale = (torch.mean(self.incoming.weight.data ** 2)) ** 0.5
+        # self.incoming.weight.data.copy_(self.incoming.weight.data / self.scale)
         self.bias = None
         if self.incoming.bias is not None:
             self.bias = self.incoming.bias
             self.incoming.bias = None
 
     def forward(self, x):
-        x = self.scale * x
+        scale = (torch.mean(self.incoming.weight.data ** 2)) ** 0.5
+        self.incoming.weight.data.copy_(self.incoming.weight.data / scale)
+        x = scale * x
         if self.bias is not None:
             x += self.bias.view(1, self.bias.size()[0], 1, 1)
         return x
