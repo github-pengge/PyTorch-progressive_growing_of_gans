@@ -256,7 +256,7 @@ if __name__ == '__main__':
     parser.add_argument('--gpu', default='', type=str, help='gpu(s) to use.')
     parser.add_argument('--train_kimg', default=600, type=float, help='# * 1000 real samples for each stabilizing training phase.')
     parser.add_argument('--transition_kimg', default=600, type=float, help='# * 1000 real samples for each fading in phase.')
-    parser.add_argument('--lr', default=1e-3, type=float, help='learning rate')
+    parser.add_argument('--lr', default=2e-4, type=float, help='learning rate')
     parser.add_argument('--beta1', default=0, type=float, help='beta1 for adam')
     parser.add_argument('--beta2', default=0.99, type=float, help='beta2 for adam')
     parser.add_argument('--gan', default='lsgan', type=str, help='model: lsgan/wgan_gp/gan/began, currently only support lsgan or gan with no_noise option.')
