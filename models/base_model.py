@@ -305,6 +305,126 @@ class DSelectLayer(nn.Module):
         return x
 
 
+class AEDSelectLayer(nn.Module):
+    def __init__(self, pre, chain, nins):
+        super(AEDSelectLayer, self).__init__()
+        assert len(chain) == len(nins)
+        self.pre = pre
+        self.chain = chain
+        self.nins = nins
+        self.N = len(self.chain) // 2 
+
+    def forward(self, x, cur_level=None):
+        if cur_level is None:
+            cur_level = self.N  # cur_level: physical index
+
+        max_level, min_level = int(np.floor(self.N-cur_level)), int(np.ceil(self.N-cur_level))
+        min_level_weight, max_level_weight = int(cur_level+1)-cur_level, cur_level-int(cur_level)
+        
+        _from, _to, _step = min_level, self.N, 1
+
+        if self.pre is not None:
+            x = self.pre(x)
+
+        if DEBUG:
+            print('D: level=%s, size=%s, max_level=%s, min_level=%s' % ('in', x.size(), max_level, min_level))
+
+        # encoder
+        if max_level == min_level:
+            in_max_level = 0
+        else:
+            in_max_level = self.chain[max_level](self.nins[max_level](x))
+            if DEBUG:
+                print('D: level=%s(max_level), size=%s, encoder' % (max_level, in_max_level.size()))
+        
+        for level in range(_from, _to, _step):
+            if level == min_level:
+                in_min_level = self.nins[level](x)
+                target_shape = in_max_level.size() if max_level != min_level else in_min_level.size()
+                x = min_level_weight * resize_activations(in_min_level, target_shape) + max_level_weight * in_max_level
+            x = self.chain[level](x)
+
+            if DEBUG:
+                print('D: level=%s, size=%s, encoder' % (level, x.size()))
+
+        # decoder
+        from_, to_, step_ = self.N, 2*self.N-min_level, 1
+        for level in range(from_, to_, step_):
+            x = self.chain[level](x)
+            if level == 2*self.N-min_level-1:  # min output level
+                out_min_level = self.nins[level](x)
+
+            if DEBUG:
+                print('D: level=%s, size=%s, decoder' % (level, x.size()))
+
+        if max_level == min_level:
+            out_max_level = 0
+        else:
+            out_max_level = self.nins[2*self.N-max_level-1](self.chain[2*self.N-max_level-1](x))
+
+        target_shape = out_max_level.size() if max_level != min_level else out_min_level.size()
+        x = min_level_weight * resize_activations(out_min_level, target_shape) + max_level_weight * out_max_level
+
+        if DEBUG:
+            print('D: level=%s, size=%s' % ('out', x.size()))
+        return x
+
+        # if max_level == min_level:
+        #     x = self.nins[max_level](x)
+        #     if not min_level+1 == self.N-1:
+        #         x = self.chain[max_level](x)
+        #     if DEBUG:
+        #         print('D: level=%d, size=%s' % (min_level, x.size()))
+        # else:
+        #     out = {}
+        #     tmp = self.nins[max_level](x)
+        #     tmp = self.chain[max_level](tmp)
+        #     out['max_level'] = tmp
+        #     if DEBUG:
+        #         print('D: level=%d, size=%s' % (max_level, tmp.size()))
+        #     out['min_level'] = self.nins[min_level](x)
+        #     x = resize_activations(out['min_level'], out['max_level'].size()) * min_level_weight + \
+        #                         out['max_level'] * max_level_weight
+        #     if not min_level == self.N-1:
+        #         x = self.chain[min_level](x)
+        #     if DEBUG:
+        #         print('D: level=%d, size=%s' % (min_level, x.size()))
+
+        # for level in range(_from, _to, _step):
+        #     x = self.chain[level](x)
+
+        #     if DEBUG:
+        #         print('D: level=%d, size=%s, encoder' % (level, x.size()))
+
+        # for level in range(_to, _to-_from+_to, _step):
+        #     x = self.chain[level](x)
+
+        #     if DEBUG:
+        #         print('D: level=%d, size=%s, decoder' % (level, x.size()))
+        
+        # if min_level == max_level:
+        #     if not min_level+1 == self.N-1:
+        #         x = self.chain[_to-_from+_to](x)
+        #     x = self.nins[_to-_from+_to+1](x)
+        # else:
+        #     out = {}
+        #     if not min_level+1 == self.N-1:
+        #         tmp = self.chain[_to-_from+_to-1](x)
+        #     else:
+        #         tmp = x
+        #     out['min_level'] = self.nins[_to-_from+_to](tmp)
+        #     if DEBUG:
+        #         print('D: level=%d, size=%s, min_level' % (_to-_from+_to, out['min_level'].size()))
+        #     x = self.chain[_to-_from+_to](x)
+        #     out['max_level'] = self.nins[_to-_from+_to+1](x)
+        #     x = resize_activations(out['min_level'], out['max_level'].size()) * min_level_weight + \
+        #                 out['max_level'] * max_level_weight
+
+        # if DEBUG:
+        #     print('D: size=%s' % (x.size(),))
+        # return x
+
+
 class ConcatLayer(nn.Module):
     def __init__(self):
         super(ConcatLayer, self).__init__()

@@ -124,7 +124,7 @@ def D_conv(incoming, in_channels, out_channels, kernel_size, padding, nonlineari
         layers += [WScaleLayer(layers[-1])]
     layers += [nonlinearity]
     if use_layernorm:
-        layers += [LayerNormLayer()]
+        layers += [LayerNormLayer()]  # TODO: requires incoming layer
     if to_sequential:
         return nn.Sequential(*layers)
     else:
@@ -216,3 +216,57 @@ class Discriminator(nn.Module):
             if hasattr(module, 'strength'):
                 module.strength = gdrop_strength
         return self.output_layer(x, y, cur_level, insert_y_at)
+
+
+class AutoencodingDiscriminator(nn.Module):
+    def __init__(self, 
+                num_channels    = 1,        # Overridden based on dataset.
+                resolution      = 32,       # Overridden based on dataset.
+                fmap_base       = 4096,
+                fmap_decay      = 1.0,
+                fmap_max        = 256,
+                tanh_at_end     = False):
+        super(AutoencodingDiscriminator, self).__init__()
+        self.num_channels = num_channels
+        self.resolution = resolution
+        self.fmap_base = fmap_base
+        self.fmap_decay = fmap_decay
+        self.fmap_max = fmap_max
+        self.tanh_at_end = tanh_at_end
+
+        R = int(np.log2(resolution))
+        assert resolution == 2**R and resolution >= 4
+        
+        negative_slope = 0.2
+        act = nn.LeakyReLU(negative_slope=negative_slope)
+        iact = 'leaky_relu'
+        output_act = nn.Tanh() if self.tanh_at_end else 'linear'
+        output_iact = 'tanh' if self.tanh_at_end else 'linear'
+
+        nins = nn.ModuleList()
+        lods = nn.ModuleList()
+        pre = None
+
+        for I in range(R, 1, -1):
+            ic, oc = self.get_nf(I), self.get_nf(I-1)
+            nins.append(NINLayer([], self.num_channels, ic, act, iact, negative_slope, True, True))  # from_rgb layer
+
+            net = [nn.Conv2d(ic, oc, 3, 1, 1), act]
+            net += [nn.BatchNorm2d(oc), nn.AvgPool2d(kernel_size=2, stride=2, ceil_mode=False, count_include_pad=False)]
+            he_init(net[0], iact, negative_slope)
+            lods.append(nn.Sequential(*net))
+
+        for I in range(2, R+1):
+            ic, oc = self.get_nf(I-1), self.get_nf(I)
+            net = [nn.Upsample(scale_factor=2, mode='nearest'), nn.Conv2d(ic, oc, 3, 1, 1), act, nn.BatchNorm2d(oc)]
+            he_init(net[1], iact, negative_slope)
+            lods.append(nn.Sequential(*net))
+            nins.append(NINLayer([], oc, self.num_channels, output_act, output_iact, None, True, True))  # to_rgb layer
+
+        self.output_layer = AEDSelectLayer(pre, lods, nins)
+
+    def get_nf(self, stage):
+        return min(int(self.fmap_base / (2.0 ** (stage * self.fmap_decay))), self.fmap_max)
+
+    def forward(self, x, cur_level=None):
+        return self.output_layer(x, cur_level)

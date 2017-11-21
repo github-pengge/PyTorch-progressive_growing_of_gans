@@ -6,7 +6,7 @@ import sys, os, time
 sys.path.append('utils')
 sys.path.append('models')
 from data import CelebA, RandomNoiseGenerator
-from model import Generator, Discriminator, AutoencodingDiscriminator
+from model import Generator, AutoencodingDiscriminator
 import argparse
 import numpy as np
 from scipy.misc import imsave
@@ -33,6 +33,10 @@ class PGGAN():
         self.bs_map = {2**R: self.get_bs(2**R) for R in range(2, 11)}
         self.rows_map = {32: 8, 16: 4, 8: 4, 4: 2, 2: 2}
 
+        self.k = self.opts['k0']
+        self.lam_k = self.opts['lam_k']
+        self.gamma = self.opts['gamma']
+
         # save opts
         with open(os.path.join(os.path.join(self.opts['exp_dir'], current_time), 'options.txt'), 'w') as f:
             for k, v in self.opts.items():
@@ -53,26 +57,8 @@ class PGGAN():
             self.D.cuda()
 
     def create_optimizer(self):
-        self.optim_G = optim.Adam(self.G.parameters(), lr=self.opts['lr'], betas=(self.opts['beta1'], self.opts['beta2']))
-        self.optim_D = optim.Adam(self.D.parameters(), lr=self.opts['lr'], betas=(self.opts['beta1'], self.opts['beta2']))
-
-    def compute_began_adv_loss(self):
-
-        pass
-
-    def create_criterion(self):
-        # w is for gan
-        if self.opts['gan'] == 'lsgan':
-            self.adv_criterion = lambda p,t,w: torch.mean((p-t)**2)  # sigmoid is applied here
-        elif self.opts['gan'] == 'wgan_gp':
-            self.adv_criterion = lambda p,t,w: (-2*t+1) * torch.mean(p)
-        elif self.opts['gan'] == 'gan':
-            self.adv_criterion = lambda p,t,w: -w*(torch.mean(t*torch.log(p+1e-8)) + torch.mean((1-t)*torch.log(1-p+1e-8)))
-        else:
-            raise ValueError('Invalid/Unsupported GAN: %s.' % self.opts['gan'])
-
-    def compute_adv_loss(self, prediction, target, w):
-        return self.adv_criterion(prediction, target, w)
+        self.optim_G = optim.Adam(self.G.parameters(), lr=self.opts['g_lr'], betas=(self.opts['beta1'], self.opts['beta2']))
+        self.optim_D = optim.Adam(self.D.parameters(), lr=self.opts['d_lr'], betas=(self.opts['beta1'], self.opts['beta2']))
 
     def compute_additional_g_loss(self):
         return 0.0
@@ -84,22 +70,27 @@ class PGGAN():
         return d.data[0] if isinstance(d, Variable) else d
 
     def compute_G_loss(self):
-        g_adv_loss = self.compute_adv_loss(self.d_fake, True, 1)
+        g_adv_loss = self.rec_criterion(self.fake, self.rec_fake)
         g_add_loss = self.compute_additional_g_loss()
         self.g_adv_loss = self._get_data(g_adv_loss)
         self.g_add_loss = self._get_data(g_add_loss)
+        self.real_mse = self.g_adv_loss
         return g_adv_loss + g_add_loss
 
     def compute_D_loss(self):
-        d_adv_loss = self.compute_adv_loss(self.d_real, True, 0.5) + self.compute_adv_loss(self.d_fake, False, 0.5)
+        real_mse = self.rec_criterion(self.real, self.rec_real)
+        fake_mse = self.rec_criterion(self.fake, self.rec_fake)
+        d_adv_loss = real_mse - self.k * fake_mse
         d_add_loss = self.compute_additional_d_loss()
         self.d_adv_loss = self._get_data(d_adv_loss)
         self.d_add_loss = self._get_data(d_add_loss)
+        self.real_mse = self._get_data(real_mse)
+        self.fake_mse = self._get_data(fake_mse)
         return d_adv_loss + d_add_loss
 
     def postprocess(self):
-        # TODO: weight cliping or others
-        pass
+        self.k = self.k + self.lam_k * (self.gamma * self.real_mse - self.fake_mse)  # update k
+        self.k = min(1., max(0., self.k))
 
     def _numpy2var(self, x):
         var =  Variable(torch.from_numpy(x))
@@ -107,42 +98,27 @@ class PGGAN():
             var = var.cuda()
         return var
 
-    def add_noise(self, x):
-        # TODO: support more method of adding noise.
-        if self.opts.get('no_noise', False):
-            return x
-
-        if hasattr(self, '_d_'):
-            self._d_ = self._d_ * 0.9 + torch.mean(self.d_real).data[0] * 0.1
+    def create_criterion(self):
+        if self.opts['rec_type'] == 'l1':
+            self.rec_criterion = lambda u,v: torch.mean(torch.abs(u - v))
+        elif self.opts['rec_type'] == 'mse':
+            self.rec_criterion = lambda u,v: torch.mean((u - v) ** 2)
         else:
-            self._d_ = 0.0
-        strength = 0.2 * max(0, self._d_ - 0.5)**2
-        noise = self._numpy2var(np.random.randn(*x.size()).astype(np.float32) * strength)
-        return x + noise
+            raise ValueError('Invalid rec_type: %s' % self.opts['rec_type'])
 
-    def compute_noise_strength(self):
-        if self.opts.get('no_noise', False):
-            return 0
-
-        if hasattr(self, '_d_'):
-            self._d_ = self._d_ * 0.9 + torch.mean(self.d_real).data[0] * 0.1
-        else:
-            self._d_ = 0.0
-        strength = 0.2 * max(0, self._d_ - 0.5)**2
-        return strength
-
-    def preprocess(self, z, real):
+    def preprocess(self, z, real=None):
         self.z = self._numpy2var(z)
-        self.real = self._numpy2var(real)
+        if real is not None:
+            self.real = self._numpy2var(real)
 
     def forward_G(self, cur_level):
-        self.d_fake = self.D(self.fake, cur_level=cur_level)
+        self.fake = self.G(self.z, cur_level=cur_level)  # ...
+        self.rec_fake = self.D(self.fake, cur_level=cur_level)
     
-    def forward_D(self, cur_level, detach=True):
+    def forward_D(self, cur_level):
         self.fake = self.G(self.z, cur_level=cur_level)
-        strength = self.compute_noise_strength()
-        self.d_real = self.D(self.real, cur_level=cur_level, gdrop_strength=strength)
-        self.d_fake = self.D(self.fake.detach() if detach else self.fake, cur_level=cur_level)
+        self.rec_real = self.D(self.real, cur_level=cur_level)
+        self.rec_fake = self.D(self.fake.detach(), cur_level=cur_level)
         # print('d_real', self.d_real.view(-1))
         # print('d_fake', self.d_fake.view(-1))
         # print(self.fake[0].view(-1))
@@ -153,15 +129,15 @@ class PGGAN():
         self.optim_G.step()
         self.g_loss = self._get_data(g_loss)
 
-    def backward_D(self, retain_graph=False):
+    def backward_D(self, retain_graph=True):
         d_loss = self.compute_D_loss()
         d_loss.backward(retain_graph=retain_graph)
         self.optim_D.step()
         self.d_loss = self._get_data(d_loss)
 
     def report(self, it, num_it, phase, resol):
-        formation = 'Iter[%d|%d], %s, %s, G: %.3f, D: %.3f, G_adv: %.3f, G_add: %.3f, D_adv: %.3f, D_add: %.3f'
-        values = (it, num_it, phase, resol, self.g_loss, self.d_loss, self.g_adv_loss, self.g_add_loss, self.d_adv_loss, self.d_add_loss)
+        formation = 'Iter[%d|%d], %s, %s, G: %.3f, D: %.3f, G_adv: %.3f, G_add: %.3f, D_adv: %.3f, D_add: %.3f, kt: %.6f'
+        values = (it, num_it, phase, resol, self.g_loss, self.d_loss, self.g_adv_loss, self.g_add_loss, self.d_adv_loss, self.d_add_loss, self.k)
         print(formation % values)
 
     def train(self):
@@ -199,16 +175,21 @@ class PGGAN():
 
                 # update D
                 self.optim_D.zero_grad()
-                self.forward_D(cur_level, detach=True)  # TODO: feed gdrop_strength
+                self.forward_D(cur_level)
                 self.backward_D()
 
                 # update G
+                z = self.noise(batch_size)
+                self.preprocess(z)
                 self.optim_G.zero_grad()
                 self.forward_G(cur_level)
                 self.backward_G()
 
                 # report 
                 self.report(it, _num_it, phase, cur_resol)
+
+                # update k
+                self.postprocess()
                 
                 cur_nimg += batch_size
 
@@ -246,8 +227,8 @@ class PGGAN():
         imsave(file_name, samples)
 
     def save(self, file_name):
-        g_file = file_name + '-G.pth'
-        d_file = file_name + '-D.pth'
+        g_file = file_name + '-G-{}.pth'.format(self.k)
+        d_file = file_name + '-D-{}.pth'.format(self.k)
         torch.save(self.G.state_dict(), g_file)
         torch.save(self.D.state_dict(), d_file)
 
@@ -256,18 +237,21 @@ if __name__ == '__main__':
     parser.add_argument('--gpu', default='', type=str, help='gpu(s) to use.')
     parser.add_argument('--train_kimg', default=600, type=float, help='# * 1000 real samples for each stabilizing training phase.')
     parser.add_argument('--transition_kimg', default=600, type=float, help='# * 1000 real samples for each fading in phase.')
-    parser.add_argument('--lr', default=1e-3, type=float, help='learning rate')
+    parser.add_argument('--g_lr', default=1e-3, type=float, help='learning rate')
+    parser.add_argument('--d_lr', default=2e-4, type=float, help='learning rate')
     parser.add_argument('--beta1', default=0, type=float, help='beta1 for adam')
     parser.add_argument('--beta2', default=0.99, type=float, help='beta2 for adam')
-    parser.add_argument('--gan', default='lsgan', type=str, help='model: lsgan/wgan_gp/gan/began, currently only support lsgan or gan with no_noise option.')
     parser.add_argument('--first_resol', default=4, type=int, help='first resolution')
     parser.add_argument('--target_resol', default=256, type=int, help='target resolution')
     parser.add_argument('--drift', default=1e-3, type=float, help='drift, only available for wgan_gp.')
     parser.add_argument('--sample_freq', default=500, type=int, help='sampling frequency.')
     parser.add_argument('--save_freq', default=5000, type=int, help='save model frequency.')
     parser.add_argument('--exp_dir', default='./exp', type=str, help='experiment dir.')
-    parser.add_argument('--no_noise', action='store_true', help='do not add noise to real data.')
     parser.add_argument('--no_tanh', action='store_true', help='do not add noise to real data.')
+    parser.add_argument('--gamma', default=0.75, type=float, help='equilibrium.')
+    parser.add_argument('--lam_k', default=1e-3, type=float, help='learning rate for k.')
+    parser.add_argument('--rec_type', default='mse', type=str, help='reconstruction type: mse/l1.')
+    parser.add_argument('--k0', default=0.0, type=float, help='initial k.')
 
     # TODO: support conditional inputs
 
@@ -275,17 +259,13 @@ if __name__ == '__main__':
     opts = {k:v for k,v in args._get_kwargs()}
 
     latent_size = 512
-    sigmoid_at_end = args.gan in ['lsgan', 'gan']
     if hasattr(args, 'no_tanh'):
         tanh_at_end = False
     else:
         tanh_at_end = True
 
     G = Generator(num_channels=3, latent_size=latent_size, resolution=args.target_resol, fmap_max=512, fmap_base=8192, tanh_at_end=tanh_at_end)
-    if args.gan == 'began':
-        D = AutoencodingDiscriminator(num_channels=3, resolution=args.target_resol, fmap_max=512, fmap_base=8192)
-    else:
-        D = Discriminator(num_channels=3, resolution=args.target_resol, fmap_max=512, fmap_base=8192, sigmoid_at_end=sigmoid_at_end)
+    D = AutoencodingDiscriminator(num_channels=3, resolution=args.target_resol, fmap_max=512, fmap_base=8192, tanh_at_end=tanh_at_end)
     print(G)
     print(D)
     data = CelebA()
