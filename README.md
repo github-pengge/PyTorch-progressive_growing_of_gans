@@ -3,6 +3,8 @@ PyTorch implementation of [Progressive Growing of GANs for Improved Quality, Sta
 
 To obtain the similar results in `samples` directory, see `train_no_tanh.py` scipt for details(with default options).
 
+* **Update(20171121)**: Introduced progressive growing to [BEGAN](https://arxiv.org/abs/1703.10717), see `train_began.py` script. However, experiments showed that it did not work at this moment. Finding bugs and tuning network structure...
+
 * **Update(20171119)**: Unstable came from `resize_activation` function, after replacing `repeat` by `torch.nn.functional.upsample`, problem solved. **And now I believe that both `train.py` and `train_no_tanh` should be stable**. Restored from 128x128 stabilize, and continued training, currently at 256x256, phase = fade in, temporary results(first 2 columns on the left were generated, and the other 2 columns were taken from dataset):
 
 <p align="center">
