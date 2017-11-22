@@ -281,11 +281,11 @@ if __name__ == '__main__':
     else:
         tanh_at_end = True
 
-    G = Generator(num_channels=3, latent_size=latent_size, resolution=args.target_resol, fmap_max=512, fmap_base=8192, tanh_at_end=tanh_at_end)
+    G = Generator(num_channels=3, latent_size=latent_size, resolution=args.target_resol, fmap_max=latent_size, fmap_base=8192, tanh_at_end=tanh_at_end)
     if args.gan == 'began':
-        D = AutoencodingDiscriminator(num_channels=3, resolution=args.target_resol, fmap_max=512, fmap_base=8192)
+        D = AutoencodingDiscriminator(num_channels=3, resolution=args.target_resol, fmap_max=latent_size, fmap_base=8192)
     else:
-        D = Discriminator(num_channels=3, resolution=args.target_resol, fmap_max=512, fmap_base=8192, sigmoid_at_end=sigmoid_at_end)
+        D = Discriminator(num_channels=3, resolution=args.target_resol, fmap_max=latent_size, fmap_base=8192, sigmoid_at_end=sigmoid_at_end)
     print(G)
     print(D)
     data = CelebA()
