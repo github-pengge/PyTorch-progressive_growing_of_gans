@@ -1,7 +1,27 @@
 # Progressive growing of GANs
 PyTorch implementation of [Progressive Growing of GANs for Improved Quality, Stability, and Variation](http://arxiv.org/abs/1710.10196). 
 
-To obtain the similar results in `samples` directory, see `train_no_tanh.py` scipt for details(with default options).
+## How to create CelebA-HQ dataset
+I borrowed `h5tool.py` from [official code](https://github.com/tkarras/progressive_growing_of_gans). To create CelebA-HQ dataset, we have to download the original CelebA dataset, and the additional deltas files from [here](https://drive.google.com/open?id=0B4qLcYyJmiz0TXY1NG02bzZVRGs). After that, run
+```
+python2 h5tool.py create_celeba_hq file_name_to_save /path/to/celeba_dataset/ /path/to/celeba_hq_deltas
+```
+
+I found that MD5 checking were always failed, so I just commented out the MD5 checking part([LN 568](https://github.com/github-pengge/PyTorch-progressive_growing_of_gans/blob/master/h5tool#L568) and [LN 589](https://github.com/github-pengge/PyTorch-progressive_growing_of_gans/blob/master/h5tool#L589))
+
+With default setting, it took 1 day on my server. You can specific `num_threads` and `num_tasks` for accleration.
+
+## Training from scratch
+Currently I only offer code to read from original CelebA dataset, and the maximum resolution we can obtain is 256x256(with crop and resize). So some real images might look blurry. I'm switching to CelebA-HQ dataset right now. Hoping to obtain higher resolution.
+
+To obtain the similar results in `samples` directory, see `train_no_tanh.py` or `train.py` scipt for details(with default options). Both should work well. For example, you could run
+```
+python train.py --gpu 0 --train_kimg 600 --transition_kimg 600 --lr 1e-3 --beta1 0 --beta2 0.99 --gan lsgan --first_resol 4 --target_resol 256 --no_tanh
+```
+
+`train_kimg`(`transition_kimg`) means after seeing `train_kimg * 1000`(`transition_kimg * 1000`) real images, switching to fade in(stabilize) phase. Currently only support LSGAN and GAN with `--no_noise` option, since WGAN-GP is unavailable, `--drift` option does not affect the result. `--no_tanh` means do not use `tanh` at generator's output layer.
+
+## Update history
 
 * **Update(20171121)**: Introduced progressive growing to [BEGAN](https://arxiv.org/abs/1703.10717), see `train_began.py` script. However, experiments showed that it did not work at this moment. Finding bugs and tuning network structure...
 
