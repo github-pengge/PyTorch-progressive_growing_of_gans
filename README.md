@@ -21,6 +21,11 @@ python train.py --gpu 0 --train_kimg 600 --transition_kimg 600 --lr 1e-3 --beta1
 
 `train_kimg`(`transition_kimg`) means after seeing `train_kimg * 1000`(`transition_kimg * 1000`) real images, switching to fade in(stabilize) phase. Currently only support LSGAN and GAN with `--no_noise` option, since WGAN-GP is unavailable, `--drift` option does not affect the result. `--no_tanh` means do not use `tanh` at generator's output layer.
 
+If you are Python 2 user, You'd better add this to the top of `train.py` since I use print('something...', file=f) to write experiment settings to file.
+```
+from __future__ import print_function
+```
+
 ## Update history
 
 * **Update(20171121)**: Introduced progressive growing to [BEGAN](https://arxiv.org/abs/1703.10717), see `train_began.py` script. However, experiments showed that it did not work at this moment. Finding bugs and tuning network structure...
