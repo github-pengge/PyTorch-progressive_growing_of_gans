@@ -56,7 +56,7 @@ class CelebA():
                         'data128x128', 'data256x256', 'data512x512', 'data1024x1024']
         self._base_key = 'data'
         self.dataset = h5py.File(os.path.join(prefix, datapath), 'r')
-        self._len = {len(self.dataset[k]) for k in self.dataset}
+        self._len = {k:len(self.dataset[k]) for k in resolution}
         assert all([resol in self.dataset.keys() for resol in resolution])
 
     def __call__(self, batch_size, size):

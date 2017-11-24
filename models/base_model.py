@@ -154,7 +154,7 @@ class LayerNormLayer(nn.Module):
 
     def forward(self, x):
         x = x - mean(x, axis=range(1, len(x.size())))
-        x = x * torch.inverse(torch.sqrt(mean(x**2, axis=range(1, len(x.size())), keepdim=True) + self.eps))
+        x = x * 1.0/(torch.sqrt(mean(x**2, axis=range(1, len(x.size())), keepdim=True) + self.eps))
         x = x * self.gain
         if self.bias is not None:
             x += self.bias
