@@ -12,7 +12,7 @@ I found that MD5 checking were always failed, so I just commented out the MD5 ch
 With default setting, it took 1 day on my server. You can specific `num_threads` and `num_tasks` for accleration.
 
 ## Training from scratch
-Currently I only offer code to read from original CelebA dataset, and the maximum resolution we can obtain is 256x256(with crop and resize). So some real images might look blurry. I'm switching to CelebA-HQ dataset right now. Hoping to obtain higher resolution.
+You have to create CelebA-HQ dataset first, please follow the instructions above. 
 
 To obtain the similar results in `samples` directory, see `train_no_tanh.py` or `train.py` scipt for details(with default options). Both should work well. For example, you could run
 ```
