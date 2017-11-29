@@ -2,6 +2,7 @@
 import torch
 import torch.optim as optim
 from torch.autograd import Variable
+# from torch.optim.lr_scheduler import StepLR
 import sys, os, time
 sys.path.append('utils')
 sys.path.append('models')
@@ -24,20 +25,51 @@ class PGGAN():
         self.use_cuda = len(gpu) > 0
         os.environ['CUDA_VISIBLE_DEVICES'] = gpu
 
-        current_time = time.strftime('%Y-%m-%d %H%M%S')
-        self.opts['sample_dir'] = os.path.join(os.path.join(self.opts['exp_dir'], current_time), 'samples')
-        self.opts['ckpt_dir'] = os.path.join(os.path.join(self.opts['exp_dir'], current_time), 'ckpts')
-        os.makedirs(self.opts['sample_dir'])
-        os.makedirs(self.opts['ckpt_dir'])
-
         self.bs_map = {2**R: self.get_bs(2**R) for R in range(2, 11)}
         self.rows_map = {32: 8, 16: 4, 8: 4, 4: 2, 2: 2}
 
+        self.restore_model()
+
         # save opts
-        with open(os.path.join(os.path.join(self.opts['exp_dir'], current_time), 'options.txt'), 'w') as f:
+        with open(os.path.join(self.opts['exp_dir'], self.time, 'options_%s.txt'%self.current_time), 'w') as f:
             for k, v in self.opts.items():
                 print('%s: %s' % (k, v), file=f)
             print('batch_size_map: %s' % self.bs_map, file=f)
+
+    def restore_model(self):
+        exp_dir = self.opts['restore_dir']
+        which_file = self.opts['which_file']  # 128x128-fade_in-105000
+        self.current_time = time.strftime('%Y-%m-%d %H%M%S')
+        if exp_dir == '' or which_file == '':
+            self.time = self.current_time
+            self._from_resol = self.opts['first_resol']
+            self._phase = 'stabilize'
+            self._epoch = 0
+            self.is_restored = False
+            self.opts['sample_dir'] = os.path.join(self.opts['exp_dir'], self.current_time, 'samples')
+            self.opts['ckpt_dir'] = os.path.join(self.opts['exp_dir'], self.current_time, 'ckpts')
+            os.makedirs(self.opts['sample_dir'])
+            os.makedirs(self.opts['ckpt_dir'])
+            return 
+        else:
+            pattern = which_file.split('-')
+            self._from_resol = int(pattern[0].split('x')[0])
+            self._phase = pattern[1]
+            self._epoch = int(pattern[2])
+            tmp = exp_dir.split('/')
+            self.opts['exp_dir'] = '/'.join(tmp[:-1])
+            self.time = tmp[-1]
+            self.opts['sample_dir'] = os.path.join(exp_dir, 'samples')
+            self.opts['ckpt_dir'] = os.path.join(exp_dir, 'ckpts')
+            assert os.path.exists(self.opts['sample_dir']) and os.path.exists(self.opts['ckpt_dir'])
+
+            G_model = os.path.join(self.opts['ckpt_dir'], which_file+'-G.pth')
+            D_model = os.path.join(self.opts['ckpt_dir'], which_file+'-D.pth')
+            assert os.path.exists(G_model) and os.path.exists(D_model)
+            self.G.load_state_dict(torch.load(G_model))
+            self.D.load_state_dict(torch.load(D_model))
+            self.is_restored = True
+            print('Restored from dir: %s, pattern: %s' % (exp_dir, which_file))
 
     def get_bs(self, resolution):
         R = int(np.log2(resolution))
@@ -53,13 +85,9 @@ class PGGAN():
             self.D.cuda()
 
     def create_optimizer(self):
-        self.optim_G = optim.Adam(self.G.parameters(), lr=self.opts['lr'], betas=(self.opts['beta1'], self.opts['beta2']))
-        self.optim_D = optim.Adam(self.D.parameters(), lr=self.opts['lr'], betas=(self.opts['beta1'], self.opts['beta2']))
-
-    def compute_began_adv_loss(self):
-
-        pass
-
+        self.optim_G = optim.Adam(self.G.parameters(), lr=self.opts['g_lr_max'], betas=(self.opts['beta1'], self.opts['beta2']))
+        self.optim_D = optim.Adam(self.D.parameters(), lr=self.opts['d_lr_max'], betas=(self.opts['beta1'], self.opts['beta2']))
+        
     def create_criterion(self):
         # w is for gan
         if self.opts['gan'] == 'lsgan':
@@ -91,11 +119,35 @@ class PGGAN():
         return g_adv_loss + g_add_loss
 
     def compute_D_loss(self):
-        d_adv_loss = self.compute_adv_loss(self.d_real, True, 0.5) + self.compute_adv_loss(self.d_fake, False, 0.5)
+        d_adv_loss = self.compute_adv_loss(self.d_real, True, 0.5) + self.compute_adv_loss(self.d_fake, False, 0.5)*self.opts['fake_weight']
         d_add_loss = self.compute_additional_d_loss()
         self.d_adv_loss = self._get_data(d_adv_loss)
         self.d_add_loss = self._get_data(d_add_loss)
         return d_adv_loss + d_add_loss
+
+    def _rampup(self, epoch, rampup_length):
+        if epoch < rampup_length:
+            p = max(0.0, float(epoch)) / float(rampup_length)
+            p = 1.0 - p
+            return np.exp(-p*p*5.0)
+        else:
+            return 1.0
+
+    def _rampdown_linear(self, epoch, num_epochs, rampdown_length):
+        if epoch >= num_epochs - rampdown_length:
+            return float(num_epochs - epoch) / rampdown_length
+        else:
+            return 1.0
+
+    def update_lr(self, cur_nimg):
+        for param_group in self.optim_G.param_groups:
+            lrate_coef = self._rampup(cur_nimg / 1000.0, self.opts['rampup_kimg'])
+            lrate_coef *= self._rampdown_linear(cur_nimg / 1000.0, self.opts['total_kimg'], self.opts['rampdown_kimg'])
+            param_group['lr'] = lrate_coef * self.opts['g_lr_max']
+        for param_group in self.optim_D.param_groups:
+            lrate_coef = self._rampup(cur_nimg / 1000.0, self.opts['rampup_kimg'])
+            lrate_coef *= self._rampdown_linear(cur_nimg / 1000.0, self.opts['total_kimg'], self.opts['rampdown_kimg'])
+            param_group['lr'] = lrate_coef * self.opts['d_lr_max']
 
     def postprocess(self):
         # TODO: weight cliping or others
@@ -107,25 +159,25 @@ class PGGAN():
             var = var.cuda()
         return var
 
-    def add_noise(self, x):
-        # TODO: support more method of adding noise.
-        if self.opts.get('no_noise', False):
-            return x
+    # def add_noise(self, x):
+    #     # TODO: support more method of adding noise.
+    #     if self.opts.get('no_noise', False):
+    #         return x
 
-        if hasattr(self, '_d_'):
-            self._d_ = self._d_ * 0.9 + torch.mean(self.d_real).data[0] * 0.1
-        else:
-            self._d_ = 0.0
-        strength = 0.2 * max(0, self._d_ - 0.5)**2
-        noise = self._numpy2var(np.random.randn(*x.size()).astype(np.float32) * strength)
-        return x + noise
+    #     if hasattr(self, '_d_'):
+    #         self._d_ = self._d_ * 0.9 + torch.mean(self.d_real).data[0] * 0.1
+    #     else:
+    #         self._d_ = 0.0
+    #     strength = 0.2 * max(0, self._d_ - 0.5)**2
+    #     noise = self._numpy2var(np.random.randn(*x.size()).astype(np.float32) * strength)
+    #     return x + noise
 
     def compute_noise_strength(self):
         if self.opts.get('no_noise', False):
             return 0
 
         if hasattr(self, '_d_'):
-            self._d_ = self._d_ * 0.9 + torch.mean(self.d_real).data[0] * 0.1
+            self._d_ = self._d_ * 0.9 + np.clip(torch.mean(self.d_real).data[0], 0.0, 1.0) * 0.1
         else:
             self._d_ = 0.0
         strength = 0.2 * max(0, self._d_ - 0.5)**2
@@ -164,6 +216,48 @@ class PGGAN():
         values = (it, num_it, phase, resol, self.g_loss, self.d_loss, self.g_adv_loss, self.g_add_loss, self.d_adv_loss, self.d_add_loss)
         print(formation % values)
 
+    def train_phase(self, R, phase, batch_size, cur_nimg, from_it, total_it):
+        assert total_it >= from_it
+        resol = 2 ** (R+1)
+ 
+        for it in range(from_it, total_it):
+            if phase == 'stabilize':
+                cur_level = R
+            else:
+                cur_level = R + to_it/float(from_it)
+            cur_resol = 2 ** int(np.ceil(cur_level+1))
+
+            # get a batch noise and real images
+            z = self.noise(batch_size)
+            x = self.data(batch_size, cur_resol)
+
+            # preprocess
+            self.preprocess(z, x)
+            self.update_lr(cur_nimg)
+
+            # update D
+            self.optim_D.zero_grad()
+            self.forward_D(cur_level, detach=True)
+            self.backward_D()
+
+            # update G
+            self.optim_G.zero_grad()
+            self.forward_G(cur_level)
+            self.backward_G()
+
+            # report 
+            self.report(it, total_it, phase, cur_resol)
+
+            cur_nimg += batch_size
+
+            # sampling
+            if (it % self.opts['sample_freq'] == 0) or it == total_it-1:
+                self.sample(os.path.join(self.opts['sample_dir'], '%dx%d-%s-%s.png' % (cur_resol, cur_resol, phase, str(it).zfill(6))))
+
+            # save model
+            if (it % self.opts['save_freq'] == 0 and it > 0) or it == total_it-1:
+                self.save(os.path.join(self.opts['ckpt_dir'], '%dx%d-%s-%s' % (cur_resol, cur_resol, phase, str(it).zfill(6))))
+        
     def train(self):
         # prepare
         self.create_optimizer()
@@ -171,60 +265,27 @@ class PGGAN():
         self.registe_on_gpu()
 
         to_level = int(np.log2(self.opts['target_resol']))
-        from_level = int(np.log2(self.opts['first_resol']))
-        assert 2**to_level == self.opts['target_resol'] and 2**from_level == self.opts['first_resol'] and to_level >= from_level >= 2
-        cur_level = from_level
-
+        from_level = int(np.log2(self._from_resol))
+        assert 2**to_level == self.opts['target_resol'] and 2**from_level == self._from_resol and to_level >= from_level >= 2
+        
         for R in range(from_level-1, to_level):
             batch_size = self.bs_map[2 ** (R+1)]
             train_kimg = int(self.opts['train_kimg'] * 1000)
             transition_kimg = int(self.opts['transition_kimg'] * 1000)
-            if R == to_level-1:
-                transition_kimg = 0
-            cur_nimg = 0
-            _len = len(str(train_kimg + transition_kimg))
-            _num_it = (train_kimg + transition_kimg) // batch_size
-            for it in range(_num_it):
-                # determined current level: int for stabilizing and float for fading in
-                cur_level = R + float(max(cur_nimg-train_kimg, 0)) / transition_kimg 
-                cur_resol = 2 ** int(np.ceil(cur_level+1))
-                phase = 'stabilize' if int(cur_level) == cur_level else 'fade_in'
 
-                # get a batch noise and real images
-                z = self.noise(batch_size)
-                x = self.data(batch_size, cur_resol)
+            phases = {'stabilize':[0, train_kimg//batch_size], 'fade_in':[train_kimg//batch_size+1, (transition_kimg+train_kimg)//batch_size]}
+            if self.is_restored and R == from_level-1:
+                phases[self._phase][0] = self._epoch + 1
+                if self._phase == 'fade_in':
+                    del phases['stabilize']
 
-                # preprocess
-                self.preprocess(z, x)
-
-                # update D
-                self.optim_D.zero_grad()
-                self.forward_D(cur_level, detach=True)  # TODO: feed gdrop_strength
-                self.backward_D()
-
-                # update G
-                self.optim_G.zero_grad()
-                self.forward_G(cur_level)
-                self.backward_G()
-
-                # report 
-                self.report(it, _num_it, phase, cur_resol)
-                
-                cur_nimg += batch_size
-
-                # sampling
-                if (it % self.opts['sample_freq'] == 0) or it == _num_it-1:
-                    self.sample(os.path.join(self.opts['sample_dir'], '%dx%d-%s-%s.png' % (cur_resol, cur_resol, phase, str(it).zfill(6))))
-
-                # save model
-                if (it % self.opts['save_freq'] == 0 and it > 0) or it == _num_it-1:
-                    self.save(os.path.join(self.opts['ckpt_dir'], '%dx%d-%s-%s' % (cur_resol, cur_resol, phase, str(it).zfill(6))))
+            for phase, _range in phases.items():
+                self.train_phase(R, 'stabilize', batch_size, _range[0]*batch_size, _range[0], _range[1])
 
     def sample(self, file_name):
         batch_size = self.z.size(0)
         n_row = self.rows_map[batch_size]
         n_col = int(np.ceil(batch_size / float(n_row)))
-        white_space = np.ones((self.real.size(1), self.real.size(2), 3))
         samples = []
         i = j = 0
         for row in range(n_row):
@@ -232,17 +293,20 @@ class PGGAN():
             # fake
             for col in range(n_col):
                 one_row.append(self.fake[i].cpu().data.numpy())
-                one_row.append(white_space)
                 i += 1
-            one_row.append(white_space)
             # real
             for col in range(n_col):
                 one_row.append(self.real[j].cpu().data.numpy())
-                if col < n_col-1:
-                    one_row.append(white_space)
                 j += 1
             samples += [np.concatenate(one_row, axis=2)]
         samples = np.concatenate(samples, axis=1).transpose([1, 2, 0])
+
+        half = samples.shape[1] // 2
+        samples[:,:half,:] = samples[:,:half,:] - np.min(samples[:,:half,:])
+        samples[:,:half,:] = samples[:,:half,:] / np.max(samples[:,:half,:])
+        samples[:,half:,:] = samples[:,half:,:] - np.min(samples[:,half:,:])
+        samples[:,half:,:] = samples[:,half:,:] / np.max(samples[:,half:,:])
+
         imsave(file_name, samples)
 
     def save(self, file_name):
@@ -256,10 +320,15 @@ if __name__ == '__main__':
     parser.add_argument('--gpu', default='', type=str, help='gpu(s) to use.')
     parser.add_argument('--train_kimg', default=600, type=float, help='# * 1000 real samples for each stabilizing training phase.')
     parser.add_argument('--transition_kimg', default=600, type=float, help='# * 1000 real samples for each fading in phase.')
-    parser.add_argument('--lr', default=2e-4, type=float, help='learning rate')
+    parser.add_argument('--total_kimg', default=10000, type=float, help='total_kimg: a param to compute lr.')
+    parser.add_argument('--rampup_kimg', default=10000, type=float, help='rampup_kimg.')
+    parser.add_argument('--rampdown_kimg', default=10000, type=float, help='rampdown_kimg.')
+    parser.add_argument('--g_lr_max', default=1e-3, type=float, help='learning rate')
+    parser.add_argument('--d_lr_max', default=1e-3, type=float, help='learning rate')
+    parser.add_argument('--fake_weight', default=0.1, type=float, help="weight of fake images' loss of D")
     parser.add_argument('--beta1', default=0, type=float, help='beta1 for adam')
     parser.add_argument('--beta2', default=0.99, type=float, help='beta2 for adam')
-    parser.add_argument('--gan', default='lsgan', type=str, help='model: lsgan/wgan_gp/gan/began, currently only support lsgan or gan with no_noise option.')
+    parser.add_argument('--gan', default='lsgan', type=str, help='model: lsgan/wgan_gp/gan, currently only support lsgan or gan with no_noise option.')
     parser.add_argument('--first_resol', default=4, type=int, help='first resolution')
     parser.add_argument('--target_resol', default=256, type=int, help='target resolution')
     parser.add_argument('--drift', default=1e-3, type=float, help='drift, only available for wgan_gp.')
@@ -268,6 +337,8 @@ if __name__ == '__main__':
     parser.add_argument('--exp_dir', default='./exp', type=str, help='experiment dir.')
     parser.add_argument('--no_noise', action='store_true', help='do not add noise to real data.')
     parser.add_argument('--no_tanh', action='store_true', help='do not add noise to real data.')
+    parser.add_argument('--restore_dir', default='', type=str, help='restore from which exp dir.')
+    parser.add_argument('--which_file', default='', type=str, help='restore from which file, e.g. 128x128-fade_in-105000.')
 
     # TODO: support conditional inputs
 
@@ -282,10 +353,7 @@ if __name__ == '__main__':
         tanh_at_end = True
 
     G = Generator(num_channels=3, latent_size=latent_size, resolution=args.target_resol, fmap_max=latent_size, fmap_base=8192, tanh_at_end=tanh_at_end)
-    if args.gan == 'began':
-        D = AutoencodingDiscriminator(num_channels=3, resolution=args.target_resol, fmap_max=latent_size, fmap_base=8192)
-    else:
-        D = Discriminator(num_channels=3, resolution=args.target_resol, fmap_max=latent_size, fmap_base=8192, sigmoid_at_end=sigmoid_at_end)
+    D = Discriminator(num_channels=3, resolution=args.target_resol, fmap_max=latent_size, fmap_base=8192, sigmoid_at_end=sigmoid_at_end)
     print(G)
     print(D)
     data = CelebA()

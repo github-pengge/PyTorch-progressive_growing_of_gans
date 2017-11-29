@@ -204,7 +204,7 @@ class Discriminator(nn.Module):
 
         oc = 1 + self.label_size
         # lods.append(NINLayer(net, self.get_nf(0), oc, 'linear', 'linear', None, True, self.use_wscale))
-        lods.append(NINLayer(net, self.get_nf(0), oc, nn.Sigmoid(), 'sigmoid', None, True, self.use_wscale))
+        lods.append(NINLayer(net, self.get_nf(0), oc, output_act, output_iact, None, True, self.use_wscale))
 
         self.output_layer = DSelectLayer(pre, lods, nins)
 

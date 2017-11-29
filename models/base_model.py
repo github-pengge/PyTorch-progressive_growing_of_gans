@@ -105,7 +105,7 @@ class MinibatchDiscriminationLayer(nn.Module):
 
 
 class GDropLayer(nn.Module):
-    def __init__(self, mode='mul', strength=0.4, axes=(0,1), normalize=False):
+    def __init__(self, mode='mul', strength=0.2, axes=(0,1), normalize=False):
         super(GDropLayer, self).__init__()
         self.mode = mode.lower()
         assert self.mode in ['mul', 'drop', 'prop'], 'Invalid GDropLayer mode'%mode

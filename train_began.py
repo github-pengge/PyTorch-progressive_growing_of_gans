@@ -89,7 +89,7 @@ class PGGAN():
         return d_adv_loss + d_add_loss
 
     def postprocess(self):
-        self.k = self.k + self.lam_k * (self.gamma * self.real_mse - self.fake_mse)  # update k
+        self.k = self.k + self.lam_k * (self.gamma * self.real_mse - self.g_loss)  # update k
         self.k = min(1., max(0., self.k))
 
     def _numpy2var(self, x):
@@ -176,7 +176,7 @@ class PGGAN():
                 # update D
                 self.optim_D.zero_grad()
                 self.forward_D(cur_level)
-                self.backward_D()
+                self.backward_D(False)
 
                 # update G
                 z = self.noise(batch_size)
@@ -250,7 +250,7 @@ if __name__ == '__main__':
     parser.add_argument('--no_tanh', action='store_true', help='do not add noise to real data.')
     parser.add_argument('--gamma', default=0.75, type=float, help='equilibrium.')
     parser.add_argument('--lam_k', default=1e-3, type=float, help='learning rate for k.')
-    parser.add_argument('--rec_type', default='mse', type=str, help='reconstruction type: mse/l1.')
+    parser.add_argument('--rec_type', default='l1', type=str, help='reconstruction type: mse/l1.')
     parser.add_argument('--k0', default=0.0, type=float, help='initial k.')
 
     # TODO: support conditional inputs
