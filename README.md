@@ -28,6 +28,8 @@ from __future__ import print_function
 
 ## Update history
 
+* **Update(20171129)**: Add restoration mode. Basides, after many trying, I failed to combine BEGAN and PG-GAN. It's removed from the repository.
+
 * **Update(20171124)**: Now training with CelebA-HQ dataset. Besides, still failing to introduce progressive growing to BEGAN, even with many modifications.
 
 * **Update(20171121)**: Introduced progressive growing to [BEGAN](https://arxiv.org/abs/1703.10717), see `train_began.py` script. However, experiments showed that it did not work at this moment. Finding bugs and tuning network structure...
