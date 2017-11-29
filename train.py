@@ -7,7 +7,7 @@ import sys, os, time
 sys.path.append('utils')
 sys.path.append('models')
 from data import CelebA, RandomNoiseGenerator
-from model import Generator, Discriminator, AutoencodingDiscriminator
+from model import Generator, Discriminator
 import argparse
 import numpy as np
 from scipy.misc import imsave
