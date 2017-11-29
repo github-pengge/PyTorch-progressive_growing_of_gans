@@ -267,11 +267,12 @@ class PGGAN():
         to_level = int(np.log2(self.opts['target_resol']))
         from_level = int(np.log2(self._from_resol))
         assert 2**to_level == self.opts['target_resol'] and 2**from_level == self._from_resol and to_level >= from_level >= 2
+
+        train_kimg = int(self.opts['train_kimg'] * 1000)
+        transition_kimg = int(self.opts['transition_kimg'] * 1000)
         
         for R in range(from_level-1, to_level):
             batch_size = self.bs_map[2 ** (R+1)]
-            train_kimg = int(self.opts['train_kimg'] * 1000)
-            transition_kimg = int(self.opts['transition_kimg'] * 1000)
 
             phases = {'stabilize':[0, train_kimg//batch_size], 'fade_in':[train_kimg//batch_size+1, (transition_kimg+train_kimg)//batch_size]}
             if self.is_restored and R == from_level-1:
@@ -279,8 +280,10 @@ class PGGAN():
                 if self._phase == 'fade_in':
                     del phases['stabilize']
 
-            for phase, _range in phases.items():
-                self.train_phase(R, 'stabilize', batch_size, _range[0]*batch_size, _range[0], _range[1])
+            for phase in ['stabilize', 'fade_in']:
+                if phase in phases:
+                    _range = phases[phase]
+                    self.train_phase(R, phase, batch_size, _range[0]*batch_size, _range[0], _range[1])
 
     def sample(self, file_name):
         batch_size = self.z.size(0)
