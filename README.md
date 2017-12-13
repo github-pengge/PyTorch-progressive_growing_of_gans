@@ -28,6 +28,8 @@ from __future__ import print_function
 
 ## Update history
 
+* **Update(20171213)**: Update `data.py`, now when fading in, real images are weighted combination of current resolution images and 0.5x resolution images. This weighting trick is similar to the one used in Generator's outputs or Discriminator's inputs. This helps stabilize when fading in.
+
 * **Update(20171129)**: Add restoration mode. Basides, after many trying, I failed to combine BEGAN and PG-GAN. It's removed from the repository.
 
 * **Update(20171124)**: Now training with CelebA-HQ dataset. Besides, still failing to introduce progressive growing to BEGAN, even with many modifications.
