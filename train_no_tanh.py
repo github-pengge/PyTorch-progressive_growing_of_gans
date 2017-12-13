@@ -176,7 +176,7 @@ class PGGAN():
 
                 # get a batch noise and real images
                 z = self.noise(batch_size)
-                x = self.data(batch_size, cur_resol)
+                x = self.data(batch_size, cur_resol, cur_level)
 
                 # preprocess
                 self.preprocess(z, x)
@@ -208,7 +208,6 @@ class PGGAN():
         batch_size = self.z.size(0)
         n_row = self.rows_map[batch_size]
         n_col = int(np.ceil(batch_size / float(n_row)))
-        white_space = np.ones((self.real.size(1), self.real.size(2), 3))
         samples = []
         i = j = 0
         for row in range(n_row):
@@ -216,17 +215,20 @@ class PGGAN():
             # fake
             for col in range(n_col):
                 one_row.append(self.fake[i].cpu().data.numpy())
-                one_row.append(white_space)
                 i += 1
-            one_row.append(white_space)
             # real
             for col in range(n_col):
                 one_row.append(self.real[j].cpu().data.numpy())
-                if col < n_col-1:
-                    one_row.append(white_space)
                 j += 1
             samples += [np.concatenate(one_row, axis=2)]
         samples = np.concatenate(samples, axis=1).transpose([1, 2, 0])
+
+        half = samples.shape[1] // 2
+        samples[:,:half,:] = samples[:,:half,:] - np.min(samples[:,:half,:])
+        samples[:,:half,:] = samples[:,:half,:] / np.max(samples[:,:half,:])
+        samples[:,half:,:] = samples[:,half:,:] - np.min(samples[:,half:,:])
+        samples[:,half:,:] = samples[:,half:,:] / np.max(samples[:,half:,:])
+        
         imsave(file_name, samples)
 
     def save(self, file_name):

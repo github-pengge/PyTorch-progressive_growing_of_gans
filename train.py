@@ -224,12 +224,12 @@ class PGGAN():
             if phase == 'stabilize':
                 cur_level = R
             else:
-                cur_level = R + to_it/float(from_it)
+                cur_level = R + total_it/float(from_it)
             cur_resol = 2 ** int(np.ceil(cur_level+1))
 
             # get a batch noise and real images
             z = self.noise(batch_size)
-            x = self.data(batch_size, cur_resol)
+            x = self.data(batch_size, cur_resol, cur_level)
 
             # preprocess
             self.preprocess(z, x)
