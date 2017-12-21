@@ -83,7 +83,3 @@ tensorboard --logdir='./logs'
 
 * **Update(20171111)**: It's still under implementation. I did not care design the structure, and now I had to reimplement(phase='fade in' is hard to implement under current structure). I also fixed some bugs, since reimplementation is needed, I do not plan to pull requests at this moment.
 
-# Reference implementation
-* https://github.com/github-pengge/PyTorch-progressive_growing_of_gans
-
-
