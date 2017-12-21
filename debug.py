@@ -3,8 +3,8 @@ from torch.autograd import Variable
 import sys
 sys.path.append('./models')
 sys.path.append('./utils')
-from model import *
-from data import CelebA
+from models.model import *
+from utils.data import CelebA
 
 
 G = Generator(num_channels=3, resolution=1024, fmap_max=512, fmap_base=8192, latent_size=512)

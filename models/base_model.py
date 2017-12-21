@@ -14,6 +14,9 @@ DEBUG = False
 
 
 class PixelNormLayer(nn.Module):
+    """
+    Pixelwise feature vector normalization.
+    """
     def __init__(self, eps=1e-8):
         super(PixelNormLayer, self).__init__()
         self.eps = eps
@@ -26,6 +29,9 @@ class PixelNormLayer(nn.Module):
 
 
 class WScaleLayer(nn.Module):
+    """
+    Applies equalized learning rate to the preceding layer.
+    """
     def __init__(self, incoming):
         super(WScaleLayer, self).__init__()
         self.incoming = incoming
@@ -56,6 +62,9 @@ def mean(tensor, axis, **kwargs):
 
 
 class MinibatchStatConcatLayer(nn.Module):
+    """Minibatch stat concatenation layer.
+    - averaging tells how much averaging to use ('all', 'spatial', 'none')
+    """
     def __init__(self, averaging='all'):
         super(MinibatchStatConcatLayer, self).__init__()
         self.averaging = averaging.lower()
@@ -71,7 +80,8 @@ class MinibatchStatConcatLayer(nn.Module):
         vals = self.adjusted_std(x, dim=0, keepdim=True)
         if self.averaging == 'all':
             target_shape[1] = 1
-            vals = torch.mean(vals, keepdim=True)
+            vals = torch.mean(vals, dim=1, keepdim=True)#vals = torch.mean(vals, keepdim=True)
+
         elif self.averaging == 'spatial':
             if len(shape) == 4:
                 vals = mean(vals, axis=[2,3], keepdim=True)  # torch.mean(torch.mean(vals, 2, keepdim=True), 3, keepdim=True)
@@ -88,7 +98,7 @@ class MinibatchStatConcatLayer(nn.Module):
             vals = vals.view(self.n, self.shape[1]/self.n, self.shape[2], self.shape[3])
             vals = mean(vals, axis=0, keepdim=True).view(1, self.n, 1, 1)
         vals = vals.expand(*target_shape)
-        return torch.cat([x, vals], 1)
+        return torch.cat([x, vals], 1) # feature-map concatanation
 
     def __repr__(self):
         return self.__class__.__name__ + '(averaging = %s)' % (self.averaging)
@@ -103,8 +113,11 @@ class MinibatchDiscriminationLayer(nn.Module):
         pass
 
 
-
 class GDropLayer(nn.Module):
+    """
+    # Generalized dropout layer. Supports arbitrary subsets of axes and different
+    # modes. Mainly used to inject multiplicative Gaussian noise in the network.
+    """
     def __init__(self, mode='mul', strength=0.2, axes=(0,1), normalize=False):
         super(GDropLayer, self).__init__()
         self.mode = mode.lower()
@@ -141,6 +154,9 @@ class GDropLayer(nn.Module):
 
 
 class LayerNormLayer(nn.Module):
+    """
+    Layer normalization. Custom reimplementation based on the paper: https://arxiv.org/abs/1607.06450
+    """
     def __init__(self, incoming, eps=1e-4):
         super(LayerNormLayer, self).__init__()
         self.incoming = incoming
@@ -166,6 +182,12 @@ class LayerNormLayer(nn.Module):
 
 
 def resize_activations(v, so):
+    """
+    Resize activation tensor 'v' of shape 'si' to match shape 'so'.
+    :param v:
+    :param so:
+    :return:
+    """
     si = list(v.size())
     so = list(so)
     assert len(si) == len(so) and si[0] == so[0]
