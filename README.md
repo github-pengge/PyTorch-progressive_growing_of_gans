@@ -6,10 +6,6 @@ I borrowed `h5tool.py` from [official code](https://github.com/tkarras/progressi
 ```
 python2 h5tool.py create_celeba_hq file_name_to_save /path/to/celeba_dataset/ /path/to/celeba_hq_deltas
 ```
-This is what I used on my laptop
-```
-python2 h5tool.py create_celeba_hq /Users/yuan/Downloads/CelebA-HQ /Users/yuan/Downloads/CelebA/Original\ CelebA/ /Users/yuan/Downloads/CelebA/CelebA-HQ-Deltas
-```
 I found that MD5 checking were always failed, so I just commented out the MD5 checking part([LN 568](https://github.com/github-pengge/PyTorch-progressive_growing_of_gans/blob/master/h5tool#L568) and [LN 589](https://github.com/github-pengge/PyTorch-progressive_growing_of_gans/blob/master/h5tool#L589))
 
 With default setting, it took 1 day on my server. You can specific `num_threads` and `num_tasks` for accleration.
