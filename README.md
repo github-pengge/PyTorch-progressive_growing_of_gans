@@ -1,4 +1,4 @@
-# Face Aging with Progressive growing of GANs
+# Progressive growing of GANs
 PyTorch implementation of [Progressive Growing of GANs for Improved Quality, Stability, and Variation](http://arxiv.org/abs/1710.10196). 
 
 ## How to create CelebA-HQ dataset
