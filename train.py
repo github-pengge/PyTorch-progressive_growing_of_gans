@@ -230,14 +230,14 @@ class PGGAN():
     def tensorboard(self, it, num_it, phase, resol, samples):
         # (1) Log the scalar values
         prefix = str(resol)+'/'+phase+'/'
-        info = {prefix + 'g_loss': self.g_loss,
-                prefix + 'g_adv_loss': self.g_adv_loss,
-                prefix + 'g_add_loss': self.g_add_loss,
-                prefix + 'd_loss': self.d_loss,
-                prefix + 'd_adv_loss': self.d_adv_loss,
-                prefix + 'd_add_loss': self.d_add_loss,
-                prefix + 'd_adv_loss_fake': self._get_data(self.d_adv_loss_fake),
-                prefix + 'd_adv_loss_real': self._get_data(self.d_adv_loss_real)}
+        info = {prefix + 'G_loss': self.g_loss,
+                prefix + 'G_adv_loss': self.g_adv_loss,
+                prefix + 'G_add_loss': self.g_add_loss,
+                prefix + 'D_loss': self.d_loss,
+                prefix + 'D_adv_loss': self.d_adv_loss,
+                prefix + 'D_add_loss': self.d_add_loss,
+                prefix + 'D_adv_loss_fake': self._get_data(self.d_adv_loss_fake),
+                prefix + 'D_adv_loss_real': self._get_data(self.d_adv_loss_real)}
 
         for tag, value in info.items():
             self.logger.scalar_summary(tag, value, it)
@@ -377,8 +377,8 @@ if __name__ == '__main__':
     parser.add_argument('--total_kimg', default=10000, type=float, help='total_kimg: a param to compute lr.')
     parser.add_argument('--rampup_kimg', default=10000, type=float, help='rampup_kimg.')
     parser.add_argument('--rampdown_kimg', default=10000, type=float, help='rampdown_kimg.')
-    parser.add_argument('--g_lr_max', default=1e-3, type=float, help='learning rate')
-    parser.add_argument('--d_lr_max', default=1e-3, type=float, help='learning rate')
+    parser.add_argument('--g_lr_max', default=1e-3, type=float, help='Generator learning rate')
+    parser.add_argument('--d_lr_max', default=1e-3, type=float, help='Discriminator learning rate')
     parser.add_argument('--fake_weight', default=0.1, type=float, help="weight of fake images' loss of D")
     parser.add_argument('--beta1', default=0, type=float, help='beta1 for adam')
     parser.add_argument('--beta2', default=0.99, type=float, help='beta2 for adam')
@@ -386,7 +386,7 @@ if __name__ == '__main__':
     parser.add_argument('--first_resol', default=4, type=int, help='first resolution')
     parser.add_argument('--target_resol', default=256, type=int, help='target resolution')
     parser.add_argument('--drift', default=1e-3, type=float, help='drift, only available for wgan_gp.')
-    parser.add_argument('--mbstat_avg', default='all', type=str, help='MinibatchStatConcatLayer averaging strategy')
+    parser.add_argument('--mbstat_avg', default='all', type=str, help='MinibatchStatConcatLayer averaging strategy (Which dimensions to average the statistic over?)')
     parser.add_argument('--sample_freq', default=500, type=int, help='sampling frequency.')
     parser.add_argument('--save_freq', default=5000, type=int, help='save model frequency.')
     parser.add_argument('--exp_dir', default='./exp', type=str, help='experiment dir.')
@@ -400,7 +400,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
     opts = {k:v for k,v in args._get_kwargs()}
 
+    # Dimensionality of the latent vector.
     latent_size = 512
+    # Use sigmoid activation for the last layer?
     sigmoid_at_end = args.gan in ['lsgan', 'gan']
     if hasattr(args, 'no_tanh'):
         tanh_at_end = False

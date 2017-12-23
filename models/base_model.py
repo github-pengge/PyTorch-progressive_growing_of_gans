@@ -22,7 +22,7 @@ class PixelNormLayer(nn.Module):
         self.eps = eps
     
     def forward(self, x):
-        return x / (torch.mean(x**2, dim=1, keepdim=True) + 1e-8) ** 0.5
+        return x / torch.sqrt(torch.mean(x ** 2, dim=1, keepdim=True) + 1e-8)
 
     def __repr__(self):
         return self.__class__.__name__ + '(eps = %s)' % (self.eps)
@@ -72,28 +72,28 @@ class MinibatchStatConcatLayer(nn.Module):
             self.n = int(self.averaging[5:])
         else:
             assert self.averaging in ['all', 'flat', 'spatial', 'none', 'gpool'], 'Invalid averaging mode'%self.averaging
-        self.adjusted_std = lambda x, **kwargs: torch.sqrt(torch.mean((x - torch.mean(x, **kwargs)) ** 2, **kwargs) + 1e-8)
+        self.adjusted_std = lambda x, **kwargs: torch.sqrt(torch.mean((x - torch.mean(x, **kwargs)) ** 2, **kwargs) + 1e-8) #Tstdeps in the original implementation
 
     def forward(self, x):
         shape = list(x.size())
         target_shape = shape.copy()
-        vals = self.adjusted_std(x, dim=0, keepdim=True)
-        if self.averaging == 'all':
+        vals = self.adjusted_std(x, dim=0, keepdim=True)# per activation, over minibatch dim
+        if self.averaging == 'all':  # average everything --> 1 value per minibatch
             target_shape[1] = 1
             vals = torch.mean(vals, dim=1, keepdim=True)#vals = torch.mean(vals, keepdim=True)
 
-        elif self.averaging == 'spatial':
+        elif self.averaging == 'spatial':  # average spatial locations
             if len(shape) == 4:
                 vals = mean(vals, axis=[2,3], keepdim=True)  # torch.mean(torch.mean(vals, 2, keepdim=True), 3, keepdim=True)
-        elif self.averaging == 'none':
+        elif self.averaging == 'none':  # no averaging, pass on all information
             target_shape = [target_shape[0]] + [s for s in target_shape[1:]]
-        elif self.averaging == 'gpool':
+        elif self.averaging == 'gpool':  # EXPERIMENTAL: compute variance (func) over minibatch AND spatial locations.
             if len(shape) == 4:
                 vals = mean(x, [0,2,3], keepdim=True)  # torch.mean(torch.mean(torch.mean(x, 2, keepdim=True), 3, keepdim=True), 0, keepdim=True)
-        elif self.averaging == 'flat':
+        elif self.averaging == 'flat':  # variance of ALL activations --> 1 value per minibatch
             target_shape[1] = 1
             vals = torch.FloatTensor([self.adjusted_std(x)])
-        else:  # self.averaging == 'group'
+        else:  # self.averaging == 'group'  # average everything over n groups of feature maps --> n values per minibatch
             target_shape[1] = self.n
             vals = vals.view(self.n, self.shape[1]/self.n, self.shape[2], self.shape[3])
             vals = mean(vals, axis=0, keepdim=True).view(1, self.n, 1, 1)
