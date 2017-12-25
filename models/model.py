@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from base_model import *
+from models.base_model import *
 
 
 def G_conv(incoming, in_channels, out_channels, kernel_size, padding, nonlinearity, init, param=None, 
@@ -165,7 +165,9 @@ class Discriminator(nn.Module):
 
         negative_slope = 0.2
         act = nn.LeakyReLU(negative_slope=negative_slope)
+        # input activation
         iact = 'leaky_relu'
+        # output activation
         output_act = nn.Sigmoid() if self.sigmoid_at_end else 'linear'
         output_iact = 'sigmoid' if self.sigmoid_at_end else 'linear'
         gdrop_param = {'mode': 'prop', 'strength': gdrop_strength}
@@ -199,6 +201,7 @@ class Discriminator(nn.Module):
         net = D_conv(net, oc, self.get_nf(0), 4, 0, act, iact, negative_slope, False,
                     self.use_wscale, self.use_gdrop, self.use_layernorm, gdrop_param)
 
+        # Increasing Variation Using MINIBATCH Standard Deviation
         if self.mbdisc_kernels:
             net += [MinibatchDiscriminationLayer(num_kernels=self.mbdisc_kernels)]
 

@@ -6,12 +6,12 @@ from torch.autograd import Variable
 import sys, os, time
 sys.path.append('utils')
 sys.path.append('models')
-from data import CelebA, RandomNoiseGenerator
-from model import Generator, Discriminator
+from utils.data import CelebA, RandomNoiseGenerator
+from models.model import Generator, Discriminator
 import argparse
 import numpy as np
 from scipy.misc import imsave
-
+from utils.logger import Logger
 
 class PGGAN():
     def __init__(self, G, D, data, noise, opts):
@@ -20,12 +20,13 @@ class PGGAN():
         self.data = data
         self.noise = noise
         self.opts = opts
-
+        self.current_time = time.strftime('%Y-%m-%d %H%M%S')
+        self.logger = Logger('./logs/' + self.current_time + "/")
         gpu = self.opts['gpu']
         self.use_cuda = len(gpu) > 0
         os.environ['CUDA_VISIBLE_DEVICES'] = gpu
 
-        self.bs_map = {2**R: self.get_bs(2**R) for R in range(2, 11)}
+        self.bs_map = {2**R: self.get_bs(2**R) for R in range(2, 11)} # batch size map keyed by resolution_level
         self.rows_map = {32: 8, 16: 4, 8: 4, 4: 2, 2: 2}
 
         self.restore_model()
@@ -79,7 +80,7 @@ class PGGAN():
             bs = 8 / 2**(min(2, R-7))
         return int(bs)
 
-    def registe_on_gpu(self):
+    def register_on_gpu(self):
         if self.use_cuda:
             self.G.cuda()
             self.D.cuda()
@@ -119,10 +120,13 @@ class PGGAN():
         return g_adv_loss + g_add_loss
 
     def compute_D_loss(self):
-        d_adv_loss = self.compute_adv_loss(self.d_real, True, 0.5) + self.compute_adv_loss(self.d_fake, False, 0.5)*self.opts['fake_weight']
+        self.d_adv_loss_real = self.compute_adv_loss(self.d_real, True, 0.5)
+        self.d_adv_loss_fake = self.compute_adv_loss(self.d_fake, False, 0.5) * self.opts['fake_weight']
+        d_adv_loss = self.d_adv_loss_real + self.d_adv_loss_fake
         d_add_loss = self.compute_additional_d_loss()
         self.d_adv_loss = self._get_data(d_adv_loss)
         self.d_add_loss = self._get_data(d_add_loss)
+
         return d_adv_loss + d_add_loss
 
     def _rampup(self, epoch, rampup_length):
@@ -139,6 +143,8 @@ class PGGAN():
         else:
             return 1.0
 
+    '''Update Learning rate
+    '''
     def update_lr(self, cur_nimg):
         for param_group in self.optim_G.param_groups:
             lrate_coef = self._rampup(cur_nimg / 1000.0, self.opts['rampup_kimg'])
@@ -154,10 +160,15 @@ class PGGAN():
         pass
 
     def _numpy2var(self, x):
-        var =  Variable(torch.from_numpy(x))
+        var = Variable(torch.from_numpy(x))
         if self.use_cuda:
             var = var.cuda()
         return var
+
+    def _var2numpy(self, var):
+        if self.use_cuda:
+            return var.cpu().data.numpy()
+        return var.data.numpy()
 
     # def add_noise(self, x):
     #     # TODO: support more method of adding noise.
@@ -216,6 +227,40 @@ class PGGAN():
         values = (it, num_it, phase, resol, self.g_loss, self.d_loss, self.g_adv_loss, self.g_add_loss, self.d_adv_loss, self.d_add_loss)
         print(formation % values)
 
+    def tensorboard(self, it, num_it, phase, resol, samples):
+        # (1) Log the scalar values
+        prefix = str(resol)+'/'+phase+'/'
+        info = {prefix + 'G_loss': self.g_loss,
+                prefix + 'G_adv_loss': self.g_adv_loss,
+                prefix + 'G_add_loss': self.g_add_loss,
+                prefix + 'D_loss': self.d_loss,
+                prefix + 'D_adv_loss': self.d_adv_loss,
+                prefix + 'D_add_loss': self.d_add_loss,
+                prefix + 'D_adv_loss_fake': self._get_data(self.d_adv_loss_fake),
+                prefix + 'D_adv_loss_real': self._get_data(self.d_adv_loss_real)}
+
+        for tag, value in info.items():
+            self.logger.scalar_summary(tag, value, it)
+
+        # (2) Log values and gradients of the parameters (histogram)
+        for tag, value in self.G.named_parameters():
+            tag = tag.replace('.', '/')
+            self.logger.histo_summary('G/' + prefix +tag, self._var2numpy(value), it)
+            if value.grad is not None:
+                self.logger.histo_summary('G/' + prefix +tag + '/grad', self._var2numpy(value.grad), it)
+
+        for tag, value in self.D.named_parameters():
+            tag = tag.replace('.', '/')
+            self.logger.histo_summary('D/' + prefix + tag, self._var2numpy(value), it)
+            if value.grad is not None:
+                self.logger.histo_summary('D/' + prefix + tag + '/grad',
+                                          self._var2numpy(value.grad), it)
+
+        # (3) Log the images
+        # info = {'images': samples[:10]}
+        # for tag, images in info.items():
+        #     logger.image_summary(tag, images, it)
+
     def train_phase(self, R, phase, batch_size, cur_nimg, from_it, total_it):
         assert total_it >= from_it
         resol = 2 ** (R+1)
@@ -231,30 +276,37 @@ class PGGAN():
             z = self.noise(batch_size)
             x = self.data(batch_size, cur_resol, cur_level)
 
-            # preprocess
+            # ===preprocess===
             self.preprocess(z, x)
             self.update_lr(cur_nimg)
 
-            # update D
+            # ===update D===
             self.optim_D.zero_grad()
             self.forward_D(cur_level, detach=True)
             self.backward_D()
 
-            # update G
+            # ===update G===
             self.optim_G.zero_grad()
             self.forward_G(cur_level)
             self.backward_G()
 
-            # report 
+            # ===report ===
             self.report(it, total_it, phase, cur_resol)
 
             cur_nimg += batch_size
 
-            # sampling
+            # ===generate sample images===
+            samples = []
             if (it % self.opts['sample_freq'] == 0) or it == total_it-1:
-                self.sample(os.path.join(self.opts['sample_dir'], '%dx%d-%s-%s.png' % (cur_resol, cur_resol, phase, str(it).zfill(6))))
+                samples = self.sample()
+                imsave(os.path.join(self.opts['sample_dir'],
+                                    '%dx%d-%s-%s.png' % (cur_resol, cur_resol, phase, str(it).zfill(6))), samples)
 
-            # save model
+            # ===tensorboard visualization===
+            if (it % self.opts['sample_freq'] == 0) or it == total_it - 1:
+                self.tensorboard(it, total_it, phase, cur_resol, samples)
+
+            # ===save model===
             if (it % self.opts['save_freq'] == 0 and it > 0) or it == total_it-1:
                 self.save(os.path.join(self.opts['ckpt_dir'], '%dx%d-%s-%s' % (cur_resol, cur_resol, phase, str(it).zfill(6))))
         
@@ -262,7 +314,7 @@ class PGGAN():
         # prepare
         self.create_optimizer()
         self.create_criterion()
-        self.registe_on_gpu()
+        self.register_on_gpu()
 
         to_level = int(np.log2(self.opts['target_resol']))
         from_level = int(np.log2(self._from_resol))
@@ -270,7 +322,7 @@ class PGGAN():
 
         train_kimg = int(self.opts['train_kimg'] * 1000)
         transition_kimg = int(self.opts['transition_kimg'] * 1000)
-        
+
         for R in range(from_level-1, to_level):
             batch_size = self.bs_map[2 ** (R+1)]
 
@@ -285,7 +337,7 @@ class PGGAN():
                     _range = phases[phase]
                     self.train_phase(R, phase, batch_size, _range[0]*batch_size, _range[0], _range[1])
 
-    def sample(self, file_name):
+    def sample(self):
         batch_size = self.z.size(0)
         n_row = self.rows_map[batch_size]
         n_col = int(np.ceil(batch_size / float(n_row)))
@@ -305,12 +357,11 @@ class PGGAN():
         samples = np.concatenate(samples, axis=1).transpose([1, 2, 0])
 
         half = samples.shape[1] // 2
-        samples[:,:half,:] = samples[:,:half,:] - np.min(samples[:,:half,:])
-        samples[:,:half,:] = samples[:,:half,:] / np.max(samples[:,:half,:])
-        samples[:,half:,:] = samples[:,half:,:] - np.min(samples[:,half:,:])
-        samples[:,half:,:] = samples[:,half:,:] / np.max(samples[:,half:,:])
-
-        imsave(file_name, samples)
+        samples[:, :half, :] = samples[:, :half, :] - np.min(samples[:, :half, :])
+        samples[:, :half, :] = samples[:, :half, :] / np.max(samples[:, :half, :])
+        samples[:, half:, :] = samples[:, half:, :] - np.min(samples[:, half:, :])
+        samples[:, half:, :] = samples[:, half:, :] / np.max(samples[:, half:, :])
+        return samples
 
     def save(self, file_name):
         g_file = file_name + '-G.pth'
@@ -326,8 +377,8 @@ if __name__ == '__main__':
     parser.add_argument('--total_kimg', default=10000, type=float, help='total_kimg: a param to compute lr.')
     parser.add_argument('--rampup_kimg', default=10000, type=float, help='rampup_kimg.')
     parser.add_argument('--rampdown_kimg', default=10000, type=float, help='rampdown_kimg.')
-    parser.add_argument('--g_lr_max', default=1e-3, type=float, help='learning rate')
-    parser.add_argument('--d_lr_max', default=1e-3, type=float, help='learning rate')
+    parser.add_argument('--g_lr_max', default=1e-3, type=float, help='Generator learning rate')
+    parser.add_argument('--d_lr_max', default=1e-3, type=float, help='Discriminator learning rate')
     parser.add_argument('--fake_weight', default=0.1, type=float, help="weight of fake images' loss of D")
     parser.add_argument('--beta1', default=0, type=float, help='beta1 for adam')
     parser.add_argument('--beta2', default=0.99, type=float, help='beta2 for adam')
@@ -335,11 +386,12 @@ if __name__ == '__main__':
     parser.add_argument('--first_resol', default=4, type=int, help='first resolution')
     parser.add_argument('--target_resol', default=256, type=int, help='target resolution')
     parser.add_argument('--drift', default=1e-3, type=float, help='drift, only available for wgan_gp.')
+    parser.add_argument('--mbstat_avg', default='all', type=str, help='MinibatchStatConcatLayer averaging strategy (Which dimensions to average the statistic over?)')
     parser.add_argument('--sample_freq', default=500, type=int, help='sampling frequency.')
     parser.add_argument('--save_freq', default=5000, type=int, help='save model frequency.')
     parser.add_argument('--exp_dir', default='./exp', type=str, help='experiment dir.')
     parser.add_argument('--no_noise', action='store_true', help='do not add noise to real data.')
-    parser.add_argument('--no_tanh', action='store_true', help='do not add noise to real data.')
+    parser.add_argument('--no_tanh', action='store_true', help='do not use tanh in the last layer of the generator.')
     parser.add_argument('--restore_dir', default='', type=str, help='restore from which exp dir.')
     parser.add_argument('--which_file', default='', type=str, help='restore from which file, e.g. 128x128-fade_in-105000.')
 
@@ -348,7 +400,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
     opts = {k:v for k,v in args._get_kwargs()}
 
+    # Dimensionality of the latent vector.
     latent_size = 512
+    # Use sigmoid activation for the last layer?
     sigmoid_at_end = args.gan in ['lsgan', 'gan']
     if hasattr(args, 'no_tanh'):
         tanh_at_end = False
@@ -356,7 +410,7 @@ if __name__ == '__main__':
         tanh_at_end = True
 
     G = Generator(num_channels=3, latent_size=latent_size, resolution=args.target_resol, fmap_max=latent_size, fmap_base=8192, tanh_at_end=tanh_at_end)
-    D = Discriminator(num_channels=3, resolution=args.target_resol, fmap_max=latent_size, fmap_base=8192, sigmoid_at_end=sigmoid_at_end)
+    D = Discriminator(num_channels=3, mbstat_avg=args.mbstat_avg, resolution=args.target_resol, fmap_max=latent_size, fmap_base=8192, sigmoid_at_end=sigmoid_at_end)
     print(G)
     print(D)
     data = CelebA()

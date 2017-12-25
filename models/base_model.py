@@ -14,18 +14,24 @@ DEBUG = False
 
 
 class PixelNormLayer(nn.Module):
+    """
+    Pixelwise feature vector normalization.
+    """
     def __init__(self, eps=1e-8):
         super(PixelNormLayer, self).__init__()
         self.eps = eps
     
     def forward(self, x):
-        return x / (torch.mean(x**2, dim=1, keepdim=True) + 1e-8) ** 0.5
+        return x / torch.sqrt(torch.mean(x ** 2, dim=1, keepdim=True) + 1e-8)
 
     def __repr__(self):
         return self.__class__.__name__ + '(eps = %s)' % (self.eps)
 
 
 class WScaleLayer(nn.Module):
+    """
+    Applies equalized learning rate to the preceding layer.
+    """
     def __init__(self, incoming):
         super(WScaleLayer, self).__init__()
         self.incoming = incoming
@@ -56,6 +62,9 @@ def mean(tensor, axis, **kwargs):
 
 
 class MinibatchStatConcatLayer(nn.Module):
+    """Minibatch stat concatenation layer.
+    - averaging tells how much averaging to use ('all', 'spatial', 'none')
+    """
     def __init__(self, averaging='all'):
         super(MinibatchStatConcatLayer, self).__init__()
         self.averaging = averaging.lower()
@@ -63,32 +72,33 @@ class MinibatchStatConcatLayer(nn.Module):
             self.n = int(self.averaging[5:])
         else:
             assert self.averaging in ['all', 'flat', 'spatial', 'none', 'gpool'], 'Invalid averaging mode'%self.averaging
-        self.adjusted_std = lambda x, **kwargs: torch.sqrt(torch.mean((x - torch.mean(x, **kwargs)) ** 2, **kwargs) + 1e-8)
+        self.adjusted_std = lambda x, **kwargs: torch.sqrt(torch.mean((x - torch.mean(x, **kwargs)) ** 2, **kwargs) + 1e-8) #Tstdeps in the original implementation
 
     def forward(self, x):
         shape = list(x.size())
         target_shape = shape.copy()
-        vals = self.adjusted_std(x, dim=0, keepdim=True)
-        if self.averaging == 'all':
+        vals = self.adjusted_std(x, dim=0, keepdim=True)# per activation, over minibatch dim
+        if self.averaging == 'all':  # average everything --> 1 value per minibatch
             target_shape[1] = 1
-            vals = torch.mean(vals, keepdim=True)
-        elif self.averaging == 'spatial':
+            vals = torch.mean(vals, dim=1, keepdim=True)#vals = torch.mean(vals, keepdim=True)
+
+        elif self.averaging == 'spatial':  # average spatial locations
             if len(shape) == 4:
                 vals = mean(vals, axis=[2,3], keepdim=True)  # torch.mean(torch.mean(vals, 2, keepdim=True), 3, keepdim=True)
-        elif self.averaging == 'none':
+        elif self.averaging == 'none':  # no averaging, pass on all information
             target_shape = [target_shape[0]] + [s for s in target_shape[1:]]
-        elif self.averaging == 'gpool':
+        elif self.averaging == 'gpool':  # EXPERIMENTAL: compute variance (func) over minibatch AND spatial locations.
             if len(shape) == 4:
                 vals = mean(x, [0,2,3], keepdim=True)  # torch.mean(torch.mean(torch.mean(x, 2, keepdim=True), 3, keepdim=True), 0, keepdim=True)
-        elif self.averaging == 'flat':
+        elif self.averaging == 'flat':  # variance of ALL activations --> 1 value per minibatch
             target_shape[1] = 1
             vals = torch.FloatTensor([self.adjusted_std(x)])
-        else:  # self.averaging == 'group'
+        else:  # self.averaging == 'group'  # average everything over n groups of feature maps --> n values per minibatch
             target_shape[1] = self.n
             vals = vals.view(self.n, self.shape[1]/self.n, self.shape[2], self.shape[3])
             vals = mean(vals, axis=0, keepdim=True).view(1, self.n, 1, 1)
         vals = vals.expand(*target_shape)
-        return torch.cat([x, vals], 1)
+        return torch.cat([x, vals], 1) # feature-map concatanation
 
     def __repr__(self):
         return self.__class__.__name__ + '(averaging = %s)' % (self.averaging)
@@ -103,8 +113,11 @@ class MinibatchDiscriminationLayer(nn.Module):
         pass
 
 
-
 class GDropLayer(nn.Module):
+    """
+    # Generalized dropout layer. Supports arbitrary subsets of axes and different
+    # modes. Mainly used to inject multiplicative Gaussian noise in the network.
+    """
     def __init__(self, mode='mul', strength=0.2, axes=(0,1), normalize=False):
         super(GDropLayer, self).__init__()
         self.mode = mode.lower()
@@ -141,6 +154,9 @@ class GDropLayer(nn.Module):
 
 
 class LayerNormLayer(nn.Module):
+    """
+    Layer normalization. Custom reimplementation based on the paper: https://arxiv.org/abs/1607.06450
+    """
     def __init__(self, incoming, eps=1e-4):
         super(LayerNormLayer, self).__init__()
         self.incoming = incoming
@@ -166,6 +182,12 @@ class LayerNormLayer(nn.Module):
 
 
 def resize_activations(v, so):
+    """
+    Resize activation tensor 'v' of shape 'si' to match shape 'so'.
+    :param v:
+    :param so:
+    :return:
+    """
     si = list(v.size())
     so = list(so)
     assert len(si) == len(so) and si[0] == so[0]

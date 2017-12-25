@@ -5,12 +5,12 @@ from torch.autograd import Variable
 import sys, os, time
 sys.path.append('utils')
 sys.path.append('models')
-from data import CelebA, RandomNoiseGenerator
-from model import Generator, Discriminator
+from utils.data import CelebA, RandomNoiseGenerator
+from models.model import Generator, Discriminator
 import argparse
 import numpy as np
 from scipy.misc import imsave
-
+from utils.logger import Logger
 
 class PGGAN():
     def __init__(self, G, D, data, noise, opts):
@@ -19,7 +19,8 @@ class PGGAN():
         self.data = data
         self.noise = noise
         self.opts = opts
-
+        self.current_time = time.strftime('%Y-%m-%d %H%M%S')
+        self.logger = Logger('./logs/' + self.current_time + "/")
         gpu = self.opts['gpu']
         self.use_cuda = len(gpu) > 0
         os.environ['CUDA_VISIBLE_DEVICES'] = gpu
@@ -47,14 +48,14 @@ class PGGAN():
             bs = 8 / 2**(min(2, R-7))
         return int(bs)
 
-    def registe_on_gpu(self):
+    def register_on_gpu(self):
         if self.use_cuda:
             self.G.cuda()
             self.D.cuda()
 
     def create_optimizer(self):
-        self.optim_G = optim.Adam(self.G.parameters(), lr=self.opts['lr'], betas=(self.opts['beta1'], self.opts['beta2']))
-        self.optim_D = optim.Adam(self.D.parameters(), lr=self.opts['lr'], betas=(self.opts['beta1'], self.opts['beta2']))
+        self.optim_G = optim.Adam(self.G.parameters(), lr=self.opts['g_lr_max'], betas=(self.opts['beta1'], self.opts['beta2']))
+        self.optim_D = optim.Adam(self.D.parameters(), lr=self.opts['d_lr_max'], betas=(self.opts['beta1'], self.opts['beta2']))
 
     def create_criterion(self):
         # w is for gan
@@ -87,10 +88,13 @@ class PGGAN():
         return g_adv_loss + g_add_loss
 
     def compute_D_loss(self):
-        d_adv_loss = self.compute_adv_loss(self.d_real, True, 0.5) + self.compute_adv_loss(self.d_fake, False, 0.5)
+        self.d_adv_loss_real = self.compute_adv_loss(self.d_real, True, 0.5)
+        self.d_adv_loss_fake = self.compute_adv_loss(self.d_fake, False, 0.5) * self.opts['fake_weight']
+        d_adv_loss = self.d_adv_loss_real + self.d_adv_loss_fake
         d_add_loss = self.compute_additional_d_loss()
         self.d_adv_loss = self._get_data(d_adv_loss)
         self.d_add_loss = self._get_data(d_add_loss)
+
         return d_adv_loss + d_add_loss
 
     def postprocess(self):
@@ -98,10 +102,15 @@ class PGGAN():
         pass
 
     def _numpy2var(self, x):
-        var =  Variable(torch.from_numpy(x))
+        var = Variable(torch.from_numpy(x))
         if self.use_cuda:
             var = var.cuda()
         return var
+
+    def _var2numpy(self, var):
+        if self.use_cuda:
+            return var.cpu().data.numpy()
+        return var.data.numpy()
 
     def add_noise(self, x):
         # TODO: support more method of adding noise.
@@ -147,6 +156,40 @@ class PGGAN():
         formation = 'Iter[%d|%d], %s, %s, G: %.3f, D: %.3f, G_adv: %.3f, G_add: %.3f, D_adv: %.3f, D_add: %.3f'
         values = (it, num_it, phase, resol, self.g_loss, self.d_loss, self.g_adv_loss, self.g_add_loss, self.d_adv_loss, self.d_add_loss)
         print(formation % values)
+
+    def tensorboard(self, it, num_it, phase, resol, samples):
+        # (1) Log the scalar values
+        prefix = str(resol)+'/'+phase+'/'
+        info = {prefix + 'G_loss': self.g_loss,
+                prefix + 'G_adv_loss': self.g_adv_loss,
+                prefix + 'G_add_loss': self.g_add_loss,
+                prefix + 'D_loss': self.d_loss,
+                prefix + 'D_adv_loss': self.d_adv_loss,
+                prefix + 'D_add_loss': self.d_add_loss,
+                prefix + 'D_adv_loss_fake': self._get_data(self.d_adv_loss_fake),
+                prefix + 'D_adv_loss_real': self._get_data(self.d_adv_loss_real)}
+
+        for tag, value in info.items():
+            self.logger.scalar_summary(tag, value, it)
+
+        # (2) Log values and gradients of the parameters (histogram)
+        for tag, value in self.G.named_parameters():
+            tag = tag.replace('.', '/')
+            self.logger.histo_summary('G/' + prefix +tag, self._var2numpy(value), it)
+            if value.grad is not None:
+                self.logger.histo_summary('G/' + prefix +tag + '/grad', self._var2numpy(value.grad), it)
+
+        for tag, value in self.D.named_parameters():
+            tag = tag.replace('.', '/')
+            self.logger.histo_summary('D/' + prefix + tag, self._var2numpy(value), it)
+            if value.grad is not None:
+                self.logger.histo_summary('D/' + prefix + tag + '/grad',
+                                          self._var2numpy(value.grad), it)
+
+        # (3) Log the images
+        # info = {'images': samples[:10]}
+        # for tag, images in info.items():
+        #     logger.image_summary(tag, images, it)
 
     def train(self):
         # prepare
@@ -197,8 +240,15 @@ class PGGAN():
                 cur_nimg += batch_size
 
                 # sampling
+                samples = []
                 if (it % self.opts['sample_freq'] == 0) or it == _num_it-1:
-                    self.sample(os.path.join(self.opts['sample_dir'], '%dx%d-%s-%s.png' % (cur_resol, cur_resol, phase, str(it).zfill(6))))
+                    samples = self.sample()
+                    imsave(os.path.join(self.opts['sample_dir'],
+                                        '%dx%d-%s-%s.png' % (cur_resol, cur_resol, phase, str(it).zfill(6))), samples)
+
+                # ===tensorboard visualization===
+                if (it % self.opts['sample_freq'] == 0) or it == _num_it - 1:
+                    self.tensorboard(it, _num_it, phase, cur_resol, samples)
 
                 # save model
                 if (it % self.opts['save_freq'] == 0 and it > 0) or it == _num_it-1:
@@ -228,8 +278,7 @@ class PGGAN():
         samples[:,:half,:] = samples[:,:half,:] / np.max(samples[:,:half,:])
         samples[:,half:,:] = samples[:,half:,:] - np.min(samples[:,half:,:])
         samples[:,half:,:] = samples[:,half:,:] / np.max(samples[:,half:,:])
-        
-        imsave(file_name, samples)
+        return samples
 
     def save(self, file_name):
         g_file = file_name + '-G.pth'
@@ -242,7 +291,8 @@ if __name__ == '__main__':
     parser.add_argument('--gpu', default='', type=str, help='gpu(s) to use.')
     parser.add_argument('--train_kimg', default=600, type=float, help='# * 1000 real samples for each stabilizing training phase.')
     parser.add_argument('--transition_kimg', default=600, type=float, help='# * 1000 real samples for each fading in phase.')
-    parser.add_argument('--lr', default=1e-3, type=float, help='learning rate')
+    parser.add_argument('--g_lr_max', default=1e-3, type=float, help='Generator learning rate')
+    parser.add_argument('--d_lr_max', default=1e-3, type=float, help='Discriminator learning rate')
     parser.add_argument('--beta1', default=0, type=float, help='beta1 for adam')
     parser.add_argument('--beta2', default=0.99, type=float, help='beta2 for adam')
     parser.add_argument('--gan', default='lsgan', type=str, help='model: lsgan/wgan_gp/gan, currently only support lsgan or gan with no_noise option.')

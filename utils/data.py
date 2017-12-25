@@ -5,6 +5,8 @@ import numpy as np
 import h5py
 
 
+#prefix = 'C:\\Users\\yuan\\Downloads'
+# prefix = '/Users/yuan/Downloads/'
 prefix = './datasets/'
 
 def get_img(img_path, is_crop=True, crop_h=256, resize_h=64, normalize=False):

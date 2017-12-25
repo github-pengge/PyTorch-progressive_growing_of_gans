@@ -1,6 +1,6 @@
 import sys
 sys.path.append('models')
-from model import AutoencodingDiscriminator
+from models import AutoencodingDiscriminator
 import torch
 from torch.autograd import Variable
 D = AutoencodingDiscriminator(3, 32)
