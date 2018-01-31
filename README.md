@@ -1,4 +1,4 @@
-# PyTorch implementation of [Progressive Growing of GANs for Improved Quality, Stability, and Variation](http://arxiv.org/abs/1710.10196). 
+PyTorch implementation of [Progressive Growing of GANs for Improved Quality, Stability, and Variation](http://arxiv.org/abs/1710.10196). 
 
 ## How to create CelebA-HQ dataset
 I borrowed `h5tool.py` from [official code](https://github.com/tkarras/progressive_growing_of_gans). To create CelebA-HQ dataset, we have to download the original CelebA dataset, and the additional deltas files from [here](https://drive.google.com/open?id=0B4qLcYyJmiz0TXY1NG02bzZVRGs). After that, run
